@@ -2,6 +2,7 @@ package ai.opencode.ide.jetbrains.api
 
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEventDeserializer
+import ai.opencode.ide.jetbrains.api.models.SessionExecutionEvent
 import ai.opencode.ide.jetbrains.util.PathUtil
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
@@ -54,6 +55,7 @@ class SseEventListener(
     @Volatile
     private var call: Call? = null
     private val isActive = AtomicBoolean(false)
+    private val workspaceSessions = mutableSetOf<String>()
 
     override fun connect() {
         if (!isActive.compareAndSet(false, true)) return
@@ -121,10 +123,18 @@ class SseEventListener(
     private fun parseAndDispatchEvent(json: String) {
         try {
             val payload = JsonParser.parseString(json).asJsonObject
+            val sessionId = payload.getAsJsonObject("data")?.get("sessionID")?.asString
             val location = payload.getAsJsonObject("location")?.get("directory")?.asString
-            if (location == null ||
-                PathUtil.toOpenCodeServerPath(location) != PathUtil.toOpenCodeServerPath(projectPath)) return
+            if (location != null) {
+                val matches = PathUtil.toOpenCodeServerPath(location) == PathUtil.toOpenCodeServerPath(projectPath)
+                if (sessionId != null) {
+                    if (matches) workspaceSessions.add(sessionId) else workspaceSessions.remove(sessionId)
+                }
+                if (!matches) return
+            }
             val event = gson.fromJson(payload, OpenCodeEvent::class.java)
+            // V2 execution events may have no location. Scope them by a previously located session.
+            if (location == null && (event !is SessionExecutionEvent || sessionId !in workspaceSessions)) return
             if (event != null) onEvent(event)
         } catch (e: Exception) {
             logger.debug("[SSE] Parse error: ${e.message}")

@@ -17,7 +17,6 @@ out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 .intellijPlatform
-gradle
 
 ### Eclipse ###
 .apt_generated

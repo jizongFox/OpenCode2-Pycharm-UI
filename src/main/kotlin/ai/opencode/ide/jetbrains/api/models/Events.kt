@@ -19,6 +19,10 @@ data class InboxEnqueuedEvent(val data: InboxEnqueuedData) : OpenCodeEvent("sess
 data class InboxEnqueuedData(val sessionID: String, val inboxID: String, val item: InboxItem)
 data class InboxItem(val type: String)
 
+data class InboxDeliveredEvent(val data: InboxReference) : OpenCodeEvent("session.inbox.delivered")
+data class InboxCancelledEvent(val data: InboxReference) : OpenCodeEvent("session.inbox.cancelled")
+data class InboxReference(val sessionID: String, val inboxID: String)
+
 data class UnknownEvent(override val type: String) : OpenCodeEvent(type)
 
 class OpenCodeEventDeserializer : JsonDeserializer<OpenCodeEvent> {
@@ -36,6 +40,8 @@ class OpenCodeEventDeserializer : JsonDeserializer<OpenCodeEvent> {
             "session.execution.failed", "session.execution.interrupted" ->
                 SessionExecutionEvent(type, context.deserialize(value.get("data"), SessionIdData::class.java))
             "session.inbox.enqueued" -> context.deserialize(json, InboxEnqueuedEvent::class.java)
+            "session.inbox.delivered" -> context.deserialize(json, InboxDeliveredEvent::class.java)
+            "session.inbox.cancelled" -> context.deserialize(json, InboxCancelledEvent::class.java)
             else -> UnknownEvent(type)
         }
     }

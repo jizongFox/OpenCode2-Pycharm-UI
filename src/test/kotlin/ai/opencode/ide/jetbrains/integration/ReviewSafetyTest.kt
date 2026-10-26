@@ -89,17 +89,82 @@ class ReviewSafetyTest : BasePlatformTestCase() {
         assertFalse(project.service<SessionManager>().isPending(entry))
     }
 
-    private fun reviewedFile(): Pair<DiffEntry, VirtualFile> {
+    fun testRejectDoesNotRecreateAnEmptiedFileDeletedAfterReview() {
+        val (entry, file) = reviewedFile(after = "")
+        val path = file.path
+        runWriteAction { file.delete(this) }
+        var result: ReviewResult? = null
+
+        project.service<SessionManager>().rejectDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Stale, result)
+        assertFalse(File(path).exists())
+        assertTrue(project.service<SessionManager>().isPending(entry))
+    }
+
+    fun testAcceptRefusesAnEmptiedFileDeletedAfterReview() {
+        val (entry, file) = reviewedFile(after = "")
+        runWriteAction { file.delete(this) }
+        var result: ReviewResult? = null
+
+        project.service<SessionManager>().acceptDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Stale, result)
+        assertTrue(project.service<SessionManager>().isPending(entry))
+    }
+
+    fun testRejectRestoresAnEmptiedFileThatStillExists() {
+        val (entry, file) = reviewedFile(after = "")
+        var result: ReviewResult? = null
+
+        project.service<SessionManager>().rejectDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Applied, result)
+        assertEquals("before", File(file.path).readText())
+    }
+
+    fun testRejectKeepsAnOriginallyEmptyFile() {
+        val (entry, file) = reviewedFile(before = "")
+        var result: ReviewResult? = null
+
+        project.service<SessionManager>().rejectDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Applied, result)
+        assertTrue(File(file.path).isFile)
+        assertEquals("", File(file.path).readText())
+    }
+
+    fun testRejectRecreatesAReviewedDeletion() {
+        val (entry, file) = reviewedFile(after = "", status = "deleted")
+        val path = file.path
+        runWriteAction { file.delete(this) }
+        var result: ReviewResult? = null
+
+        project.service<SessionManager>().rejectDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Applied, result)
+        assertEquals("before", File(path).readText())
+        assertFalse(project.service<SessionManager>().isPending(entry))
+    }
+
+    private fun reviewedFile(
+        before: String = "before", after: String = "agent", status: String = "modified"
+    ): Pair<DiffEntry, VirtualFile> {
         val root = createTempDirectory("opencode-review-").toFile()
         reviewRoot = root
-        val file = File(root, "review.txt").apply { writeText("agent") }
+        val file = File(root, "review.txt").apply { writeText(after) }
         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
             ?: error("Review file is unavailable")
         val manager = project.service<SessionManager>()
         manager.configureWorkspaceRoot(root.path)
         assertTrue(manager.onTurnStart())
         val entry = manager.getProcessedDiffs(
-            listOf(FileDiff("review.txt", "before", "agent", 1, 1, "modified")),
+            listOf(FileDiff("review.txt", before, after, 1, 1, status)),
             manager.onTurnEnd() ?: error("Missing review turn")
         ).single()
         return entry to virtualFile

@@ -5,14 +5,16 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /** Wire-compatible subset of the released V2 API. */
 class FakeOpenCodeServer {
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     private val streams = CopyOnWriteArrayList<OutputStream>()
-    private val responses = mutableMapOf<String, String>()
-    private val errors = mutableSetOf<String>()
+    private val responses = ConcurrentHashMap<String, String>()
+    private val errors = ConcurrentHashMap.newKeySet<String>()
+    private val executor = Executors.newCachedThreadPool()
     val requestedTurns = CopyOnWriteArrayList<String>()
     val port: Int get() = server.address.port
 
@@ -48,11 +50,14 @@ class FakeOpenCodeServer {
                 streams.remove(stream)
             }
         }
-        server.executor = Executors.newCachedThreadPool()
+        server.executor = executor
     }
 
     fun start() = server.start()
-    fun stop() = server.stop(0)
+    fun stop() {
+        server.stop(0)
+        executor.shutdownNow()
+    }
     fun respondTo(from: String, json: String) { responses[from] = json }
     fun respondErrorTo(from: String) { errors.add(from) }
 

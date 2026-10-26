@@ -83,6 +83,7 @@ class OpenCodeLogicTest {
             server.broadcast("""{"type":"session.status","location":{"directory":"/elsewhere"},"data":{"sessionID":"ses_one","status":{"type":"busy"}}}""")
             server.broadcast("""{"type":"session.inbox.enqueued","location":{"directory":$dir},"data":{"sessionID":"ses_one","inboxID":"msg_first","item":{"type":"user"}}}""")
             server.broadcast("""{"type":"session.status","location":{"directory":$dir},"data":{"sessionID":"ses_one","status":{"type":"busy"}}}""")
+            server.broadcast("""{"type":"session.inbox.delivered","location":{"directory":$dir},"data":{"sessionID":"ses_one","inboxID":"msg_first"}}""")
             server.broadcast("""{"type":"session.status","location":{"directory":$dir},"data":{"sessionID":"ses_one","status":{"type":"idle"}}}""")
 
             val deadline = System.currentTimeMillis() + 4000

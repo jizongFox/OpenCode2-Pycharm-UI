@@ -1,4 +1,4 @@
-# OpenCode UI for JetBrains (V2) — 2.2.1
+# OpenCode UI for JetBrains (V2) — 2.2.2
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
@@ -21,6 +21,10 @@ On each completed turn, the plugin reads the V2 per-turn diff and opens a native
 
 A stale review asks you to refresh it. A staging or restoration failure reports the failed operation separately and keeps the entry pending. Connection resets invalidate old review events, delayed requests, and pending paste callbacks.
 
+An emptied file must still exist when you apply its review. If you delete it after review, both Accept and Reject report a stale review. A reviewed deletion can still be accepted or restored normally.
+
+Reviews use the first user message actually delivered during the busy/idle cycle. Cancelled inputs do not select a turn, and delivery order determines the message ID when queued and steering inputs differ. Later messages in the same busy cycle remain part of that turn. V2 execution events without a directory are accepted only for sessions already associated with this workspace. Queued completion and review-unavailable notifications expire with their connection generation.
+
 ## Connection lifecycle
 
 The plugin owns only local servers it started. A new local server gets a random password passed to both the server and attached TUI. Closing the IDE terminates that server. Connecting to an existing server never terminates it. A remote server requires a local V2 CLI for the embedded TUI and the server password if configured.
@@ -41,7 +45,7 @@ The Diff service owns the current review tab or window. Accept/Reject callbacks 
 | `TerminalHost` | Project-owned TUI, editor tab placement, and bracketed-paste context insertion |
 | `PromptDelivery` | Ordered citations, bounded retries after terminal creation, and reset cancellation |
 | `OpenCodeApiClient` | `/api/info`, `/api/event`, per-turn `/api/session/{id}/diff` |
-| `ReviewCoordinator` | Match busy/idle and user message ID to one turn |
+| `ReviewCoordinator` | Match busy/idle with the first delivered user message and guard review UI callbacks |
 | `SessionManager` | Current turn, pending file reviews, and guarded accept/reject |
 
 The V2 API does not expose a prompt-append route. The plugin writes references to its own terminal TTY after startup, without submitting them. The terminal shell is replaced by the OpenCode TUI on Unix-like systems so exiting the TUI ends that process. A terminal that takes unusually long to initialize may require retrying the shortcut.
@@ -51,6 +55,8 @@ The V2 API does not expose a prompt-append route. The plugin writes references t
 On Linux x86_64 with Python 3.12+, use the standard release entry point:
 
 ```bash
+git clone https://github.com/jizongFox/OpenCode2-Pycharm-UI.git
+cd OpenCode2-Pycharm-UI
 python3 scripts/build_release.py
 ```
 
@@ -64,7 +70,9 @@ For a manually prepared environment, use the Gradle wrapper directly. Supply `-P
 
 The installable ZIP is generated under `build/distributions/`. Use **Settings → Plugins → Install Plugin from Disk** to install it.
 
-Release 2.2.1 adds 17 regression cases for connection publication, protocol/authentication errors, and review navigation. Against PyCharm 2026.2.3 (262.10968.92), 49 tests passed, three original optional external-process tests were skipped, and plugin structure validation passed. Plugin Verifier reported Compatible, with existing deprecated, scheduled-for-removal, and experimental API usage notices. Real detached-terminal placement and native GUI interactions still require an installation check.
+Release 2.2.2 adds regression coverage for emptied/deleted files, inbox cancellation and delivery order, workspace-scoped HTTP/SSE events, and notification invalidation. The HTTP/SSE cases use a local protocol fixture; live OpenCode and native GUI behavior require an installation check.
+
+The standard build resolved PyCharm 2026.2.3 (262.10968.92): 62 tests passed, three optional external-CLI cases were skipped, and plugin structure validation passed. Plugin Verifier reported Compatible with the existing deprecated, scheduled-for-removal, and experimental API notices.
 
 ## License
 

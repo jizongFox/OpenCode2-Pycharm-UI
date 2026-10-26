@@ -6,7 +6,7 @@ data class DiffEntry(val file: String, val diff: FileDiff) {
     val beforeContent: String get() = diff.before
 
     fun matchesCurrentContent(diskContent: String?, documentContent: String?): Boolean {
-        if (diff.status == "deleted" || (diskContent == null && diff.after.isEmpty())) {
+        if (diff.status == "deleted") {
             return diskContent == null && documentContent == null
         }
         return diskContent == diff.after && (documentContent == null || documentContent == diff.after)
