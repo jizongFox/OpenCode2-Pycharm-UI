@@ -64,7 +64,7 @@ class OpenCodeConnectDialog(
 
         val formPanel = JPanel(GridLayout(6, 1, 0, JBUI.scale(4)))
         val addressLabel = JBLabel("Server address:")
-        val passwordLabel = JBLabel("Server password (optional):")
+        val passwordLabel = JBLabel("Server password:")
         val basePathLabel = JBLabel("Custom base path (optional):")
 
         // Load saved values
@@ -90,9 +90,9 @@ class OpenCodeConnectDialog(
         }
 
         addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096)"
-        passwordField.toolTipText = "OPENCODE_PASSWORD"
-        passwordField.emptyText.text = "For remote OpenCode servers"
-        basePathField.toolTipText = "Override project base path for opencode.exe working directory"
+        passwordField.toolTipText = "OPENCODE_PASSWORD or pairing token. Leave blank to start a new local server."
+        passwordField.emptyText.text = "For an existing protected server"
+        basePathField.toolTipText = "Working directory for the local OpenCode terminal and workspace"
 
         formPanel.add(addressLabel)
         formPanel.add(addressField)

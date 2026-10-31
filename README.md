@@ -1,11 +1,11 @@
-# OpenCode UI for JetBrains (V2) — 2.2.2
+# OpenCode UI for JetBrains (V2) — 2.2.3
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
 ## Requirements
 
-- The latest stable PyCharm release with its bundled Terminal plugin. This release targets PyCharm 2026.2.3 (build 262).
-- OpenCode V2 CLI. Install it using the [V2 installation guide](https://opencode.ai/v2/docs), then run `opencode --version` to confirm a `2.x` release.
+- The latest stable PyCharm release with its bundled Terminal plugin. This release targets PyCharm 2026.2.4 (build 262).
+- OpenCode V2 CLI. This release checks the official **OpenCode 2.2.5** CLI and server contract. Install it using the [V2 installation guide](https://opencode.ai/v2/docs), then run `opencode --version` to confirm a `2.x` release.
 
 ## Use
 
@@ -29,11 +29,27 @@ Reviews use the first user message actually delivered during the busy/idle cycle
 
 The plugin owns only local servers it started. A new local server gets a random password passed to both the server and attached TUI. Closing the IDE terminates that server. Connecting to an existing server never terminates it. A remote server requires a local V2 CLI for the embedded TUI and the server password if configured.
 
-The V2 server and TUI must be the same version. If you upgrade OpenCode while the editor tab is open, restart the connection. The plugin does not automatically open a window or connection when the IDE starts.
+Use matching V2 server and TUI versions when possible. The current CLI warns and continues if an explicitly selected server has another version. If you upgrade OpenCode while the editor tab is open, restart the connection. The plugin does not automatically open a window or connection when the IDE starts.
 
 Connection choices, startup workers, and reconnect callbacks share one lifecycle. Resetting the connection or closing the project invalidates old work before it can publish state. A worker whose newly started server cannot be adopted shuts that process down itself. Connection probes distinguish password rejection, unsupported V2 endpoints/data, and server/network failures; both V2 identity and active-session capability are required for readiness.
 
 The Diff service owns the current review tab or window. Accept/Reject callbacks carry that review's identity, so completing an older review cannot navigate or close a newer one, and completing a manually closed review does not reopen it. The IDE's default tab/window preference is preserved.
+
+## OpenCode API compatibility
+
+Checked on 2026-10-31 against the immutable [OpenCode v2.2.5 release](https://github.com/anomalyco/opencode/releases/tag/v2.2.5), source commit `9bbb8ce18c80f099e0e448775f59d965ead40a21`, and its official Linux binary. The plugin uses these parts of the [V2 API](https://opencode.ai/v2/docs/api):
+
+| Operation | Contract used by this plugin |
+| --- | --- |
+| Start / attach TUI | `serve --hostname --port`; `--server URL --continue`; file references use `@path#start-end` |
+| Authentication / readiness | Basic user `opencode`, password or pairing token via `OPENCODE_PASSWORD`; `/api/info` and `/api/session/active` |
+| Turn events | `session.inbox.enqueued/delivered/cancelled` and `session.execution.started/succeeded/failed/interrupted` from `/api/event` |
+| Recover missed completion | `/api/session/{id}` returns epoch-millisecond `time.busy` and `time.idle`; the current idle watermark must follow the observed start |
+| Per-turn review | `/api/session/{id}/diff?from={userMessageId}` with full-file context; `status` is required |
+
+`session.execution.interrupted` with reason `shutdown` preserves the turn for recovery. Absence from `/api/session/active` describes process ownership and does not prove completion. The plugin confirms the session's idle watermark before finishing a disconnected turn. Older V2 servers without `time.busy` can use the observed execution event's `created` timestamp; without either start timestamp, completion is not inferred. Recovery applies to turns observed by the plugin, rather than reconstructing turns already running before its first connection.
+
+Empty-file additions/deletions are reviewable only when Git patch metadata proves the content is empty. Binary patches, truncated hunks, missing/unknown statuses, and explicitly incomplete entries require manual review. The decoder does not turn an empty binary payload or fallback header into empty original content.
 
 ## Implementation
 
@@ -44,7 +60,7 @@ The Diff service owns the current review tab or window. Accept/Reject callbacks 
 | `OpenCodeCli` | V2 `serve` and `--server` command construction |
 | `TerminalHost` | Project-owned TUI, editor tab placement, and bracketed-paste context insertion |
 | `PromptDelivery` | Ordered citations, bounded retries after terminal creation, and reset cancellation |
-| `OpenCodeApiClient` | `/api/info`, `/api/event`, per-turn `/api/session/{id}/diff` |
+| `OpenCodeApiClient` | Readiness, events, session projections and per-turn diffs |
 | `ReviewCoordinator` | Match busy/idle with the first delivered user message and guard review UI callbacks |
 | `SessionManager` | Current turn, pending file reviews, and guarded accept/reject |
 
@@ -70,9 +86,15 @@ For a manually prepared environment, use the Gradle wrapper directly. Supply `-P
 
 The installable ZIP is generated under `build/distributions/`. Use **Settings → Plugins → Install Plugin from Disk** to install it.
 
-Release 2.2.2 adds regression coverage for emptied/deleted files, inbox cancellation and delivery order, workspace-scoped HTTP/SSE events, and notification invalidation. The HTTP/SSE cases use a local protocol fixture; live OpenCode and native GUI behavior require an installation check.
+To include the real-release contract check, point `OPENCODE_TEST_BINARY` at an official V2 executable before building:
 
-The standard build resolved PyCharm 2026.2.3 (262.10968.92): 62 tests passed, three optional external-CLI cases were skipped, and plugin structure validation passed. Plugin Verifier reported Compatible with the existing deprecated, scheduled-for-removal, and experimental API notices.
+```bash
+OPENCODE_TEST_BINARY=/path/to/opencode python3 scripts/build_release.py
+```
+
+This optional test starts a private authenticated loopback server with isolated config/data directories. It verifies readiness, rejected credentials, session projections, and enqueue/cancel SSE payloads. It admits a prompt with `resume: false`, so it sends no model request and needs no provider credentials. Normal builds skip this check when the variable is absent. Native editor/TUI focus and window behavior still require a real PyCharm installation check.
+
+Release 2.2.3 passed 75 tests, including the real OpenCode 2.2.5 contract check; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with the existing scheduled-for-removal, deprecated, and experimental API notices.
 
 ## License
 

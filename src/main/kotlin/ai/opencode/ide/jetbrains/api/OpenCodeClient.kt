@@ -2,6 +2,7 @@ package ai.opencode.ide.jetbrains.api
 
 import ai.opencode.ide.jetbrains.api.models.FileDiff
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
+import ai.opencode.ide.jetbrains.api.models.SessionState
 
 /**
  * The OpenCode capabilities used by the IDE integration.
@@ -13,6 +14,8 @@ interface OpenCodeClient {
     fun checkHealth(): Boolean
 
     fun getActiveSessionIds(): Set<String>
+
+    fun getSessionState(sessionId: String): SessionState
 
     fun getSessionDiff(sessionId: String, fromMessageId: String): List<FileDiff>
 

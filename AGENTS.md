@@ -8,7 +8,7 @@ This document provides strict guidelines and useful context for AI agents (and h
 - **Type**: IntelliJ Platform Plugin
 - **Language**: Kotlin; bootstrap Gradle with JDK 21 and register the target IDE's bundled JBR toolchain
 - **Build System**: Gradle (Kotlin DSL)
-- **Target Platform**: Latest official stable PyCharm (currently 2026.2.3, build 262); exclude EAP and RC
+- **Target Platform**: Latest official stable PyCharm (currently 2026.2.4, build 262); exclude EAP and RC
 - **Protocol**: OpenCode V2 only
 
 ### Core Dependencies

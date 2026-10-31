@@ -6,7 +6,7 @@ import ai.opencode.ide.jetbrains.api.models.DiffEntry
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEventDeserializer
 import ai.opencode.ide.jetbrains.api.models.SessionExecutionEvent
-import ai.opencode.ide.jetbrains.api.models.SessionIdData
+import ai.opencode.ide.jetbrains.api.models.SessionExecutionData
 import ai.opencode.ide.jetbrains.api.models.fullFileDiff
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.review.ReviewCoordinator
@@ -80,11 +80,11 @@ class OpenCodeLogicTest {
             val diff = """{"data":[{"file":"edited.kt","patch":${jsonString(patch)},"additions":1,"deletions":1,"status":"modified"}]}"""
             server.respondTo("msg_first", diff)
             val dir = jsonString(root.path)
-            server.broadcast("""{"type":"session.status","location":{"directory":"/elsewhere"},"data":{"sessionID":"ses_one","status":{"type":"busy"}}}""")
+            server.broadcast("""{"type":"session.execution.started","location":{"directory":"/elsewhere"},"data":{"sessionID":"ses_one"}}""")
             server.broadcast("""{"type":"session.inbox.enqueued","location":{"directory":$dir},"data":{"sessionID":"ses_one","inboxID":"msg_first","item":{"type":"user"}}}""")
-            server.broadcast("""{"type":"session.status","location":{"directory":$dir},"data":{"sessionID":"ses_one","status":{"type":"busy"}}}""")
+            server.broadcast("""{"type":"session.execution.started","location":{"directory":$dir},"data":{"sessionID":"ses_one"}}""")
             server.broadcast("""{"type":"session.inbox.delivered","location":{"directory":$dir},"data":{"sessionID":"ses_one","inboxID":"msg_first"}}""")
-            server.broadcast("""{"type":"session.status","location":{"directory":$dir},"data":{"sessionID":"ses_one","status":{"type":"idle"}}}""")
+            server.broadcast("""{"type":"session.execution.succeeded","location":{"directory":$dir},"data":{"sessionID":"ses_one"}}""")
 
             val deadline = System.currentTimeMillis() + 4000
             while (viewer.shown.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(25)
@@ -161,7 +161,7 @@ class OpenCodeLogicTest {
         try {
             val oldToken = coordinator.currentGeneration()
             coordinator.reset()
-            coordinator.handle(SessionExecutionEvent("session.execution.started", SessionIdData("old")), oldToken)
+            coordinator.handle(SessionExecutionEvent("session.execution.started", SessionExecutionData("old")), oldToken)
 
             assertTrue("An obsolete busy event must not block the next turn", manager.onTurnStart())
         } finally {
@@ -181,9 +181,9 @@ class OpenCodeLogicTest {
             val oldToken = coordinator.currentGeneration()
             coordinator.reset()
             val token = coordinator.currentGeneration()
-            coordinator.handle(SessionExecutionEvent("session.execution.started", SessionIdData("same-id")), token)
+            coordinator.handle(SessionExecutionEvent("session.execution.started", SessionExecutionData("same-id")), token)
 
-            coordinator.handle(SessionExecutionEvent("session.execution.succeeded", SessionIdData("same-id")), oldToken)
+            coordinator.handle(SessionExecutionEvent("session.execution.succeeded", SessionExecutionData("same-id")), oldToken)
             coordinator.reconcileActiveSessions(emptySet(), oldToken)
 
             assertFalse("Old completion callbacks must leave the current turn busy", manager.onTurnStart())

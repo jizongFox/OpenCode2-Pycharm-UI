@@ -2,6 +2,7 @@ package ai.opencode.ide.jetbrains.api
 
 import ai.opencode.ide.jetbrains.api.models.FileDiff
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
+import ai.opencode.ide.jetbrains.api.models.SessionState
 import ai.opencode.ide.jetbrains.api.models.fullFileDiff
 import ai.opencode.ide.jetbrains.util.NetworkAddress
 import com.google.gson.JsonParser
@@ -64,6 +65,16 @@ open class OpenCodeApiClient(
         get("$baseUrl/api/session/active").asJsonObject.getAsJsonObject("data")?.keySet()
             ?: throw IOException("Missing V2 active sessions data")
 
+    override fun getSessionState(sessionId: String): SessionState {
+        val data = get("$baseUrl/api/session/${encode(sessionId)}").asJsonObject.getAsJsonObject("data")
+            ?: throw IOException("Missing V2 session data")
+        if (data.get("id")?.asString != sessionId) throw IOException("V2 session identity does not match $sessionId")
+        val directory = data.getAsJsonObject("location")?.get("directory")?.asString
+            ?: throw IOException("Missing V2 session location")
+        val time = data.getAsJsonObject("time") ?: throw IOException("Missing V2 session timestamps")
+        return SessionState(sessionId, directory, time.get("busy")?.asLong, time.get("idle")?.asLong)
+    }
+
     override fun getSessionDiff(sessionId: String, fromMessageId: String): List<FileDiff> {
         val response = get("$baseUrl/api/session/${encode(sessionId)}/diff?from=${encode(fromMessageId)}")
         return try {
@@ -73,11 +84,16 @@ open class OpenCodeApiClient(
                 val diff = element.asJsonObject
                 val file = diff.get("file")?.asString ?: throw IOException("Missing V2 diff path")
                 val patch = diff.get("patch")?.asString ?: throw IOException("Missing V2 patch for $file")
+                val status = diff.get("status")?.asString
+                if (status !in listOf("added", "deleted", "modified")) {
+                    throw IOException("Missing or unsupported V2 change status for $file")
+                }
+                if (diff.get("more")?.asBoolean == true) throw IOException("Incomplete V2 patch for $file")
                 fullFileDiff(
                     file, patch,
                     diff.get("additions")?.asInt ?: 0,
                     diff.get("deletions")?.asInt ?: 0,
-                    diff.get("status")?.asString
+                    status
                 ) ?: throw IOException("Unsupported V2 patch for $file")
             }
         } catch (e: Exception) {

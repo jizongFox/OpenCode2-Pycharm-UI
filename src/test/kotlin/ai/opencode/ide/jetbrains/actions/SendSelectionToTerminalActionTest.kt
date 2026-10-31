@@ -5,6 +5,7 @@ import ai.opencode.ide.jetbrains.SendSelectionToTerminalAction
 import ai.opencode.ide.jetbrains.api.OpenCodeClient
 import ai.opencode.ide.jetbrains.api.OpenCodeEventStream
 import ai.opencode.ide.jetbrains.api.models.FileDiff
+import ai.opencode.ide.jetbrains.api.models.SessionState
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
@@ -121,6 +122,8 @@ class SendSelectionToTerminalActionTest : BasePlatformTestCase() {
         val events = CopyOnWriteArrayList<String>()
 
         override fun checkHealth(): Boolean = true
+
+        override fun getSessionState(sessionId: String): SessionState = error("No review in this test")
 
         override fun getActiveSessionIds(): Set<String> = emptySet()
 

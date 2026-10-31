@@ -5,9 +5,7 @@ import ai.opencode.ide.jetbrains.api.models.InboxCancelledEvent
 import ai.opencode.ide.jetbrains.api.models.InboxDeliveredEvent
 import ai.opencode.ide.jetbrains.api.models.InboxEnqueuedEvent
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
-import ai.opencode.ide.jetbrains.api.models.SessionIdleEvent
 import ai.opencode.ide.jetbrains.api.models.SessionExecutionEvent
-import ai.opencode.ide.jetbrains.api.models.SessionStatusEvent
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
 import ai.opencode.ide.jetbrains.session.TurnSnapshot
@@ -24,6 +22,7 @@ import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Future
 
 /** Matches V2's busy/idle cycle to its per-turn diff endpoint. */
 class ReviewCoordinator(
@@ -34,7 +33,7 @@ class ReviewCoordinator(
     private val workspaceRoot: () -> String?,
     private val invokeLater: (Runnable) -> Unit
 ) {
-    private data class Turn(val sessionId: String, val messageId: String? = null)
+    private data class Turn(val sessionId: String, val messageId: String? = null, val startedAt: Long? = null)
 
     private val logger = Logger.getInstance(ReviewCoordinator::class.java)
     private val pendingUserMessages = mutableSetOf<Pair<String, String>>()
@@ -65,14 +64,11 @@ class ReviewCoordinator(
                     activeTurn = turn.copy(messageId = event.data.inboxID)
                 }
             }
-            is SessionStatusEvent -> when (event.data.status.type) {
-                "busy" -> start(event.data.sessionID)
-                "idle" -> finish(event.data.sessionID)
-                else -> Unit
-            }
-            is SessionIdleEvent -> finish(event.data.sessionID)
             is SessionExecutionEvent -> when (event.type) {
-                "session.execution.started" -> start(event.data.sessionID)
+                "session.execution.started" -> start(event.data.sessionID, event.created)
+                "session.execution.interrupted" -> {
+                    if (event.data.reason != "shutdown") finish(event.data.sessionID)
+                }
                 else -> finish(event.data.sessionID)
             }
             else -> Unit
@@ -89,17 +85,37 @@ class ReviewCoordinator(
         lastIdleNotification = null
     }
 
-    /** The V2 event stream does not replay events missed while disconnected. */
-    @Synchronized
-    fun reconcileActiveSessions(activeIds: Set<String>, token: Long) {
-        if (token != generation) return
-        activeTurn?.sessionId?.takeIf { it !in activeIds }?.let(::finish)
+    /** Reconcile missed completion events without mistaking a recoverable shutdown for an idle turn. */
+    fun reconcileActiveSessions(activeIds: Set<String>, token: Long): Future<*>? {
+        val (turn, api) = synchronized(this) {
+            if (token != generation) return null
+            val turn = activeTurn?.takeIf { it.sessionId !in activeIds } ?: return null
+            turn to (client() ?: return null)
+        }
+        return AppExecutorUtil.getAppExecutorService().submit {
+            if (token != generation) return@submit
+            try {
+                val state = api.getSessionState(turn.sessionId)
+                synchronized(this) {
+                    if (token != generation || activeTurn !== turn) return@submit
+                    val root = workspaceRoot() ?: return@submit
+                    if (PathUtil.toOpenCodeServerPath(state.directory) == PathUtil.toOpenCodeServerPath(root) &&
+                        state.completedAfter(turn.startedAt)) finish(turn.sessionId)
+                }
+            } catch (e: Exception) {
+                logger.warn("[OpenCode] Could not confirm whether the disconnected turn completed", e)
+            }
+        }
     }
 
-    private fun start(id: String) {
-        if (activeTurn != null) return
+    private fun start(id: String, startedAt: Long? = null) {
+        val current = activeTurn
+        if (current != null) {
+            if (current.sessionId == id && startedAt != null) activeTurn = current.copy(startedAt = startedAt)
+            return
+        }
         if (sessionManager().onTurnStart()) {
-            activeTurn = Turn(id)
+            activeTurn = Turn(id, startedAt = startedAt)
         }
     }
 

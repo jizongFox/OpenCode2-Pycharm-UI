@@ -2,7 +2,6 @@ package ai.opencode.ide.jetbrains.api
 
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEventDeserializer
-import ai.opencode.ide.jetbrains.api.models.SessionExecutionEvent
 import ai.opencode.ide.jetbrains.util.PathUtil
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
@@ -133,8 +132,8 @@ class SseEventListener(
                 if (!matches) return
             }
             val event = gson.fromJson(payload, OpenCodeEvent::class.java)
-            // V2 execution events may have no location. Scope them by a previously located session.
-            if (location == null && (event !is SessionExecutionEvent || sessionId !in workspaceSessions)) return
+            // V2 execution and inbox lifecycle events may contain IDs without a location.
+            if (location == null && sessionId !in workspaceSessions) return
             if (event != null) onEvent(event)
         } catch (e: Exception) {
             logger.debug("[SSE] Parse error: ${e.message}")

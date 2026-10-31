@@ -152,6 +152,44 @@ class ReviewSafetyTest : BasePlatformTestCase() {
         assertFalse(project.service<SessionManager>().isPending(entry))
     }
 
+    fun testRejectDeletesANewEmptyFile() {
+        val (entry, file) = reviewedFile(before = "", after = "", status = "added")
+        val path = file.path
+        var result: ReviewResult? = null
+        project.service<SessionManager>().rejectDiff(entry) { result = it }
+        waitForResult { result }
+        assertEquals(ReviewResult.Applied, result)
+        assertFalse(File(path).exists())
+    }
+
+    fun testAcceptStagesANewEmptyFile() {
+        val (entry, file) = reviewedFile(before = "", after = "", status = "added")
+        val root = File(file.parent.path)
+        val init = ProcessBuilder("git", "init", "--quiet").directory(root).start()
+        assertTrue(init.waitFor(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(0, init.exitValue())
+        var result: ReviewResult? = null
+        project.service<SessionManager>().acceptDiff(entry) { result = it }
+        waitForResult { result }
+        assertEquals(ReviewResult.Applied, result)
+        val show = ProcessBuilder("git", "show", ":review.txt").directory(root).start()
+        assertTrue(show.waitFor(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(0, show.exitValue())
+        assertEquals("", show.inputStream.bufferedReader().readText())
+    }
+
+    fun testRejectRestoresADeletedEmptyFile() {
+        val (entry, file) = reviewedFile(before = "", after = "", status = "deleted")
+        val path = file.path
+        runWriteAction { file.delete(this) }
+        var result: ReviewResult? = null
+        project.service<SessionManager>().rejectDiff(entry) { result = it }
+        waitForResult { result }
+        assertEquals(ReviewResult.Applied, result)
+        assertTrue(File(path).isFile)
+        assertEquals("", File(path).readText())
+    }
+
     private fun reviewedFile(
         before: String = "before", after: String = "agent", status: String = "modified"
     ): Pair<DiffEntry, VirtualFile> {

@@ -3,6 +3,8 @@ package ai.opencode.ide.jetbrains.integration
 import ai.opencode.ide.jetbrains.api.OpenCodeApiClient
 import ai.opencode.ide.jetbrains.api.OpenCodeEventStream
 import ai.opencode.ide.jetbrains.api.models.DiffEntry
+import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
+import ai.opencode.ide.jetbrains.api.models.SessionExecutionEvent
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.review.ReviewCoordinator
 import ai.opencode.ide.jetbrains.session.SessionManager
@@ -15,6 +17,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 
 /** Exercises the actual HTTP/SSE client, including V2 events without a location or item payload. */
@@ -28,6 +31,7 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
     private val notifications = CopyOnWriteArrayList<Notification>()
     private val reviews = CopyOnWriteArrayList<List<DiffEntry>>()
     private val errors = CopyOnWriteArrayList<Throwable>()
+    private val received = CopyOnWriteArrayList<OpenCodeEvent>()
 
     override fun setUp() {
         super.setUp()
@@ -59,7 +63,10 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
             }
         })
         val token = coordinator.currentGeneration()
-        stream = client.createEventStream(root.path, { coordinator.handle(it, token) }, { errors.add(it) })
+        stream = client.createEventStream(root.path, {
+            coordinator.handle(it, token)
+            received.add(it)
+        }, { errors.add(it) })
         stream.connect()
         assertTrue("The SSE subscription must be ready", server.waitForSubscriber())
     }
@@ -79,7 +86,8 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
     fun testCancelledInputCannotBecomeTheReviewedTurn() {
         enqueue("msg_cancelled")
         enqueue("msg_second")
-        event("session.inbox.cancelled", mapOf("sessionID" to "ses_main", "inboxID" to "msg_cancelled"))
+        event("session.inbox.cancelled", mapOf("sessionID" to "ses_main", "inboxID" to "msg_cancelled"),
+            directory = null)
         start()
         deliver("msg_second")
         finish()
@@ -186,6 +194,87 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
             notifications.map { it.title }.toSet())
     }
 
+    fun testShutdownKeepsTheTurnUntilTheResumedExecutionCompletes() {
+        enqueue("msg_first")
+        start()
+        deliver("msg_first")
+        event("session.execution.interrupted", mapOf("sessionID" to "ses_main", "reason" to "shutdown"),
+            directory = null)
+        start()
+        finish()
+
+        awaitReview()
+
+        assertEquals(listOf("msg_first"), server.requestedTurns)
+        assertEquals(1, reviews.size)
+    }
+
+    fun testUserInterruptionEndsTheTurn() {
+        enqueue("msg_first")
+        start()
+        deliver("msg_first")
+        event("session.execution.interrupted", mapOf("sessionID" to "ses_main", "reason" to "user"),
+            directory = null)
+
+        awaitReview()
+
+        assertEquals(listOf("msg_first"), server.requestedTurns)
+    }
+
+    fun testAbsenceFromActiveListDoesNotCompleteARecoverableTurn() {
+        beginDisconnectedTurn()
+        respondSessionTimes(busy = 1000, idle = 900)
+
+        coordinator.reconcileActiveSessions(emptySet(), coordinator.currentGeneration())?.get(5, TimeUnit.SECONDS)
+        drainUi()
+
+        assertTrue(notifications.isEmpty())
+        assertTrue(reviews.isEmpty())
+        finish()
+        awaitReview()
+        assertEquals(listOf("msg_first"), server.requestedTurns)
+    }
+
+    fun testMissedCompletionIsConfirmedByTheSessionProjection() {
+        beginDisconnectedTurn()
+        respondSessionTimes(busy = 1000, idle = 1001)
+
+        coordinator.reconcileActiveSessions(emptySet(), coordinator.currentGeneration())?.get(5, TimeUnit.SECONDS)
+
+        awaitReview()
+        assertEquals(listOf("msg_first"), server.requestedTurns)
+    }
+
+    fun testOlderServersCanUseTheExecutionTimestampWhenBusyIsAbsent() {
+        beginDisconnectedTurn()
+        respondSessionTimes(busy = null, idle = 999)
+        coordinator.reconcileActiveSessions(emptySet(), coordinator.currentGeneration())?.get(5, TimeUnit.SECONDS)
+        drainUi()
+        assertTrue(notifications.isEmpty())
+
+        respondSessionTimes(busy = null, idle = 1001)
+        coordinator.reconcileActiveSessions(emptySet(), coordinator.currentGeneration())?.get(5, TimeUnit.SECONDS)
+        awaitReview()
+    }
+
+    private fun beginDisconnectedTurn() {
+        enqueue("msg_first")
+        start()
+        deliver("msg_first")
+        // A later frame is a barrier: processing it proves the turn has started before reconciliation.
+        event("session.execution.interrupted", mapOf("sessionID" to "ses_main", "reason" to "shutdown"),
+            directory = null)
+        waitUntil { received.any { it is SessionExecutionEvent && it.data.reason == "shutdown" } }
+    }
+
+    private fun respondSessionTimes(busy: Long?, idle: Long) {
+        val time = mutableMapOf("idle" to idle)
+        if (busy != null) time["busy"] = busy
+        server.respondSessionState("ses_main", gson.toJson(mapOf("data" to mapOf(
+            "id" to "ses_main", "location" to mapOf("directory" to root.path), "time" to time
+        ))))
+    }
+
     private fun enqueue(
         id: String, type: String = "user", session: String = "ses_main", directory: String = root.path
     ) {
@@ -195,20 +284,21 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
     }
 
     private fun deliver(id: String) {
-        event("session.inbox.delivered", mapOf("sessionID" to "ses_main", "inboxID" to id))
+        event("session.inbox.delivered", mapOf("sessionID" to "ses_main", "inboxID" to id), directory = null)
     }
 
     private fun start(session: String = "ses_main") {
-        event("session.execution.started", mapOf("sessionID" to session), directory = null)
+        event("session.execution.started", mapOf("sessionID" to session), directory = null, created = 1000)
     }
 
     private fun finish(session: String = "ses_main") {
         event("session.execution.succeeded", mapOf("sessionID" to session), directory = null)
     }
 
-    private fun event(type: String, data: Map<String, Any>, directory: String? = root.path) {
+    private fun event(type: String, data: Map<String, Any>, directory: String? = root.path, created: Long? = null) {
         val payload = mutableMapOf<String, Any>("type" to type, "data" to data)
         if (directory != null) payload["location"] = mapOf("directory" to directory)
+        if (created != null) payload["created"] = created
         server.broadcast(gson.toJson(payload))
     }
 

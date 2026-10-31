@@ -71,7 +71,9 @@ open class SessionManager(private val project: Project) : Disposable {
             val relative = PathUtil.relativizeWithinRoot(workspaceRoot, diff.file) ?: return@mapNotNull null
             if (relative in snapshot.userEditedFiles) return@mapNotNull null
             val normalized = diff.copy(file = relative)
-            if (normalized.before == normalized.after) return@mapNotNull null
+            if (normalized.before == normalized.after && normalized.status !in listOf("added", "deleted")) {
+                return@mapNotNull null
+            }
             DiffEntry(relative, normalized)
         }
         entries.forEach { pendingDiffs[it.file] = it }

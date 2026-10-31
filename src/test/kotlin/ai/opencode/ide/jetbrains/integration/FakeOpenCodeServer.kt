@@ -14,13 +14,14 @@ class FakeOpenCodeServer {
     private val streams = CopyOnWriteArrayList<OutputStream>()
     private val responses = ConcurrentHashMap<String, String>()
     private val errors = ConcurrentHashMap.newKeySet<String>()
+    private val sessionStates = ConcurrentHashMap<String, String>()
     private val executor = Executors.newCachedThreadPool()
     val requestedTurns = CopyOnWriteArrayList<String>()
     val port: Int get() = server.address.port
 
     init {
         server.createContext("/api/info") { ex ->
-            val body = """{"version":"2.0.18","pid":123,"urls":[],"paths":{"tmp":"/tmp"}}"""
+            val body = """{"version":"2.2.5","pid":123,"urls":[],"paths":{"tmp":"/tmp"}}"""
             ex.sendResponseHeaders(200, body.toByteArray().size.toLong())
             ex.responseBody.use { it.write(body.toByteArray()) }
         }
@@ -30,6 +31,13 @@ class FakeOpenCodeServer {
             ex.responseBody.use { it.write(body.toByteArray()) }
         }
         server.createContext("/api/session/") { ex ->
+            val state = sessionStates[ex.requestURI.path.substringAfterLast('/')]
+            if (state != null) {
+                val bytes = state.toByteArray()
+                ex.sendResponseHeaders(200, bytes.size.toLong())
+                ex.responseBody.use { it.write(bytes) }
+                return@createContext
+            }
             val from = ex.requestURI.rawQuery?.substringAfter("from=", "")
                 ?.substringBefore('&')?.let { URLDecoder.decode(it, "UTF-8") }.orEmpty()
             requestedTurns.add(from)
@@ -60,6 +68,7 @@ class FakeOpenCodeServer {
     }
     fun respondTo(from: String, json: String) { responses[from] = json }
     fun respondErrorTo(from: String) { errors.add(from) }
+    fun respondSessionState(id: String, json: String) { sessionStates[id] = json }
 
     fun broadcast(json: String) {
         streams.forEach {

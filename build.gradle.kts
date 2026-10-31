@@ -7,8 +7,8 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "2.2.2"
-val pycharmVersion = providers.gradleProperty("pycharmVersion").getOrElse("2026.2.3")
+version = "2.2.3"
+val pycharmVersion = providers.gradleProperty("pycharmVersion").getOrElse("2026.2.4")
 val targetJavaVersion = providers.gradleProperty("targetJavaVersion").getOrElse("25")
 
 repositories {
@@ -51,12 +51,12 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>2.2.2</h2>
+            <h2>2.2.3</h2>
             <ul>
-                <li>Refuses Accept and Reject when a reviewed empty file has since been removed.</li>
-                <li>Associates reviews with delivered user messages, respecting cancellation and delivery order.</li>
-                <li>Scopes locationless V2 execution events to known workspace sessions.</li>
-                <li>Discards review notifications queued before a connection reset.</li>
+                <li>Aligns turn recovery with the OpenCode 2.2.5 session projection and shutdown semantics.</li>
+                <li>Uses public V2 execution events and confirms missed completion through session timestamps.</li>
+                <li>Reviews proven empty-file additions/deletions and refuses incomplete or binary restoration data.</li>
+                <li>Adds an isolated real-release HTTP/SSE contract check without model execution.</li>
             </ul>
         """.trimIndent()
     }
@@ -74,6 +74,7 @@ tasks {
     withType<Test> {
         // Fixture and nested helper classes are not JUnit test suites.
         include("**/*Test.class")
+        inputs.property("openCodeTestBinary", providers.environmentVariable("OPENCODE_TEST_BINARY").orElse(""))
     }
 
     // Set the JVM compatibility versions
