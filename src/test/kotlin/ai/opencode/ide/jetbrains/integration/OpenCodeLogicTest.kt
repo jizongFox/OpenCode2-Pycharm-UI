@@ -197,7 +197,7 @@ class OpenCodeLogicTest {
     @Test
     fun localTuiCommandReplacesTheShell() {
         if (System.getProperty("os.name").lowercase().contains("windows")) return
-        val command = OpenCodeCli().buildCommand("/tmp/opencode v2", "127.0.0.1", 4096, "secret", true)
+        val command = OpenCodeCli().buildCommand("/tmp/opencode v2", "127.0.0.1", 4096, "secret", "ses_existing")
         assertTrue(command.startsWith("exec env OPENCODE_PASSWORD='secret' '/tmp/opencode v2'"))
     }
 

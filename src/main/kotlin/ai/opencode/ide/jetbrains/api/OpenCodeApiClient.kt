@@ -4,7 +4,9 @@ import ai.opencode.ide.jetbrains.api.models.FileDiff
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
 import ai.opencode.ide.jetbrains.api.models.SessionState
 import ai.opencode.ide.jetbrains.api.models.fullFileDiff
+import ai.opencode.ide.jetbrains.api.models.isSessionId
 import ai.opencode.ide.jetbrains.util.NetworkAddress
+import ai.opencode.ide.jetbrains.util.PathUtil
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import okhttp3.Credentials
@@ -13,7 +15,7 @@ import okhttp3.Request
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** Small V2 HTTP surface used for readiness, events and turn review. */
+/** Read-only V2 HTTP surface for startup, events and turn review. */
 open class OpenCodeApiClient(
     hostname: String,
     port: Int,
@@ -64,6 +66,22 @@ open class OpenCodeApiClient(
     override fun getActiveSessionIds(): Set<String> =
         get("$baseUrl/api/session/active").asJsonObject.getAsJsonObject("data")?.keySet()
             ?: throw IOException("Missing V2 active sessions data")
+
+    /** Startup lookup only: restore the newest root session in this exact working directory. */
+    fun getLatestSessionId(directory: String): String? {
+        val path = PathUtil.toOpenCodeServerPath(directory)
+        val response = get(
+            "$baseUrl/api/session?directory=${encode(path)}&parentID=null&order=desc&limit=1", probeClient
+        )
+        val sessions = response.asJsonObject.getAsJsonArray("data")
+            ?: throw IOException("Missing V2 session list data")
+        val session = sessions.firstOrNull()?.asJsonObject ?: return null
+        val id = session.get("id")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+            ?: return null
+        val location = session.getAsJsonObject("location")?.get("directory")?.asString ?: return null
+        if (session.get("parentID")?.isJsonNull == false || PathUtil.toOpenCodeServerPath(location) != path) return null
+        return id.takeIf(::isSessionId)
+    }
 
     override fun getSessionState(sessionId: String): SessionState {
         val data = get("$baseUrl/api/session/${encode(sessionId)}").asJsonObject.getAsJsonObject("data")

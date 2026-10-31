@@ -1,4 +1,4 @@
-# OpenCode UI for JetBrains (V2) — 2.2.3
+# OpenCode UI for JetBrains (V2) — 2.2.4
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
@@ -14,6 +14,8 @@ OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows
 3. Select code in the editor and press `Ctrl+Alt+K` (`Option+Cmd+K` on macOS). The plugin appends a file reference to the TUI composer and focuses it after insertion. Edit your request and press Enter to submit it.
 
 The selection syntax is `@src/example.kt#10-25`. With no selection it uses `@src/example.kt`; Project View selections can include multiple files. Clicking the OpenCode sidebar icon also opens the editor tab. Closing the tab leaves the terminal running; the next launch reopens the same session. The plugin does not open a connection on IDE startup.
+
+When a new TUI process is needed, the plugin looks up the newest root session in the configured working directory and opens it with `--session` and its real ID. A project without history opens the home screen. If the lookup fails or returns an invalid/unrelated session, the home screen still opens and existing history remains available through the TUI. The plugin does not pass `--continue`: OpenCode 2.2.5 can route that option through a temporary `dummy` session and display a session-ID validation error.
 
 References wait in order while you choose a connection or the local server starts. Paste retries begin after the terminal is created. Cancelling the connection discards the queued references; restarting it retains them and starts a fresh retry budget. Focus moves to the terminal only after a successful paste. An already visible detached terminal keeps its position.
 
@@ -41,7 +43,8 @@ Checked on 2026-10-31 against the immutable [OpenCode v2.2.5 release](https://gi
 
 | Operation | Contract used by this plugin |
 | --- | --- |
-| Start / attach TUI | `serve --hostname --port`; `--server URL --continue`; file references use `@path#start-end` |
+| Start / attach TUI | `serve --hostname --port`; `--server URL`; an existing session uses `--session ses_...`; file references use `@path#start-end` |
+| Select startup session | `/api/session?directory=...&parentID=null&order=desc&limit=1`; validate the returned ID and exact directory, otherwise open the home screen |
 | Authentication / readiness | Basic user `opencode`, password or pairing token via `OPENCODE_PASSWORD`; `/api/info` and `/api/session/active` |
 | Turn events | `session.inbox.enqueued/delivered/cancelled` and `session.execution.started/succeeded/failed/interrupted` from `/api/event` |
 | Recover missed completion | `/api/session/{id}` returns epoch-millisecond `time.busy` and `time.idle`; the current idle watermark must follow the observed start |
@@ -92,9 +95,9 @@ To include the real-release contract check, point `OPENCODE_TEST_BINARY` at an o
 OPENCODE_TEST_BINARY=/path/to/opencode python3 scripts/build_release.py
 ```
 
-This optional test starts a private authenticated loopback server with isolated config/data directories. It verifies readiness, rejected credentials, session projections, and enqueue/cancel SSE payloads. It admits a prompt with `resume: false`, so it sends no model request and needs no provider credentials. Normal builds skip this check when the variable is absent. Native editor/TUI focus and window behavior still require a real PyCharm installation check.
+This optional test starts a private authenticated loopback server with isolated config/data directories. It verifies readiness, rejected credentials, startup session selection, session projections, and enqueue/cancel SSE payloads. On Linux, it also launches the real TUI in a PTY using the plugin's generated command, both without history and with an existing session, and checks for the startup session-ID error. It admits a prompt with `resume: false`, so it sends no model request and needs no provider credentials. Normal builds skip this check when the variable is absent. Native editor focus and window behavior still require a real PyCharm installation check.
 
-Release 2.2.3 passed 75 tests, including the real OpenCode 2.2.5 contract check; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with the existing scheduled-for-removal, deprecated, and experimental API notices.
+Release 2.2.4 passed 82 tests, including the real OpenCode 2.2.5 HTTP/SSE contract and both Linux TUI startup paths; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with the existing scheduled-for-removal, deprecated, and experimental API notices.
 
 ## License
 

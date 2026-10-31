@@ -3,6 +3,7 @@ package ai.opencode.ide.jetbrains.runtime
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.diagnostic.Logger
+import ai.opencode.ide.jetbrains.api.models.isSessionId
 import ai.opencode.ide.jetbrains.util.NetworkAddress
 import java.io.File
 
@@ -34,14 +35,15 @@ class OpenCodeCli {
         hostname: String,
         port: Int,
         password: String?,
-        continueSession: Boolean
+        sessionId: String? = null
     ): String {
-        val continueFlag = if (continueSession) " --continue" else ""
+        require(sessionId == null || isSessionId(sessionId)) { "Invalid OpenCode session ID" }
+        val sessionFlag = sessionId?.let { " --session $it" }.orEmpty()
         val host = if (hostname == "0.0.0.0") "127.0.0.1" else hostname
         val url = NetworkAddress.httpBaseUrl(host, port)
         if (isWindows()) {
             val executable = if (command.contains(' ')) "\"$command\"" else command
-            val base = "$executable --server $url$continueFlag"
+            val base = "$executable --server $url$sessionFlag"
             if (password.isNullOrBlank()) return base
             val escaped = password.replace("\"", "\\\"")
             return "cmd /c \"set \"OPENCODE_PASSWORD=$escaped\" && $base\""
@@ -50,7 +52,7 @@ class OpenCodeCli {
         fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
         val environment = if (password.isNullOrBlank()) "" else "env OPENCODE_PASSWORD=${quote(password)} "
         // Replace the shell so the PTY process ends when the OpenCode TUI exits.
-        return "exec $environment${quote(command)} --server ${quote(url)}$continueFlag"
+        return "exec $environment${quote(command)} --server ${quote(url)}$sessionFlag"
     }
 
     /** The V2 TUI attaches to an already-running server. Own this process separately. */

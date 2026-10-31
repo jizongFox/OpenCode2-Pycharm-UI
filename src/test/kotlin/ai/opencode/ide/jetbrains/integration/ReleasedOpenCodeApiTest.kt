@@ -5,8 +5,10 @@ import ai.opencode.ide.jetbrains.api.OpenCodeApiClient
 import ai.opencode.ide.jetbrains.api.models.InboxCancelledEvent
 import ai.opencode.ide.jetbrains.api.models.InboxEnqueuedEvent
 import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
+import ai.opencode.ide.jetbrains.runtime.OpenCodeCli
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.pty4j.PtyProcessBuilder
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -27,9 +29,10 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlin.io.path.createTempDirectory
 
-/** Optional real-release contract check. No model requests, credentials, or shared service are used. */
+/** Optional real-release check. No model requests, provider credentials, or shared service are used. */
 class ReleasedOpenCodeApiTest {
     @Test
     fun privateReleasedServerMatchesTheClientContract() {
@@ -62,6 +65,8 @@ class ReleasedOpenCodeApiTest {
             assertEquals(ConnectionProbe.AuthenticationRequired,
                 OpenCodeApiClient("127.0.0.1", port, "opencode", "incorrect").probe())
             assertTrue(api.getActiveSessionIds().isEmpty())
+            assertNull(api.getLatestSessionId(workspace.canonicalPath))
+            assertTuiStartup(executable, workspace, port, password, process.environment(), null)
             val http = OkHttpClient.Builder().proxy(Proxy.NO_PROXY).readTimeout(5, TimeUnit.SECONDS).build()
             fun request(path: String, method: String = "POST", body: JsonObject? = null): JsonObject? {
                 val payload = if (method == "DELETE") null else
@@ -77,6 +82,8 @@ class ReleasedOpenCodeApiTest {
                 add("location", JsonObject().apply { addProperty("directory", workspace.path) })
             }
             val id = checkNotNull(request("/api/session", body = create)).getAsJsonObject("data").get("id").asString
+            assertEquals(id, api.getLatestSessionId(workspace.canonicalPath))
+            assertTuiStartup(executable, workspace, port, password, process.environment(), id)
             val state = api.getSessionState(id)
             assertEquals(workspace.canonicalPath, state.directory)
             assertNull(state.busyAt)
@@ -104,6 +111,7 @@ class ReleasedOpenCodeApiTest {
                 assertTrue(errors.isEmpty())
                 assertThrows(IOException::class.java) { api.getSessionDiff(id, message) }
                 request("/api/session/$id", method = "DELETE")
+                assertNull(api.getLatestSessionId(workspace.canonicalPath))
             } finally {
                 stream.disconnect()
             }
@@ -114,6 +122,66 @@ class ReleasedOpenCodeApiTest {
                 server.waitFor(5, TimeUnit.SECONDS)
             }
             root.deleteRecursively()
+        }
+    }
+
+    /** Exercise the same generated command as the IDE terminal without submitting a model request. */
+    private fun assertTuiStartup(
+        executable: File,
+        workspace: File,
+        port: Int,
+        password: String,
+        environment: Map<String, String>,
+        sessionId: String?
+    ) {
+        if (!System.getProperty("os.name").startsWith("Linux")) return
+        val command = OpenCodeCli().buildCommand(executable.path, "127.0.0.1", port, password, sessionId)
+        val terminalEnvironment = environment + mapOf(
+            "TERM" to "xterm-256color", "COLORTERM" to "truecolor", "OPENCODE_DISABLE_AUTOUPDATE" to "1"
+        )
+        val tui = PtyProcessBuilder(arrayOf("/bin/bash", "--noprofile", "--norc", "-c", command))
+            .setDirectory(workspace.path).setEnvironment(terminalEnvironment)
+            .setInitialColumns(160).setInitialRows(35).setRedirectErrorStream(true).start()
+        val output = StringBuffer()
+        // Pty4j's available() always returns zero; consume its blocking stream on an owned reader.
+        val reader = thread(isDaemon = true, name = "opencode-tui-contract-reader") {
+            try {
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = tui.inputStream.read(buffer)
+                    if (count < 0) break
+                    val chunk = String(buffer, 0, count, Charsets.UTF_8)
+                    output.append(chunk)
+                    if (chunk.contains("\u001b[6n")) tui.outputStream.write("\u001b[1;1R".toByteArray())
+                    if (chunk.contains("\u001b[c") || chunk.contains("\u001b[0c")) {
+                        tui.outputStream.write("\u001b[?1;2c".toByteArray())
+                    }
+                    if (chunk.contains("\u001b]11;?")) {
+                        tui.outputStream.write("\u001b]11;rgb:0000/0000/0000\u001b\\".toByteArray())
+                    }
+                    tui.outputStream.flush()
+                }
+            } catch (_: IOException) {
+                // Terminating the owned TUI closes the PTY.
+            }
+        }
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(7)
+            while (tui.isAlive && System.nanoTime() < deadline) Thread.sleep(20)
+            val text = output.toString().replace(Regex("\u001b\\[[0-?]*[ -/]*[@-~]"), "")
+            assertTrue("The released TUI must remain open after startup", tui.isAlive)
+            assertTrue("The released TUI must render its interface: ${text.takeLast(1200)}", text.contains("OpenCode"))
+            assertFalse("Startup must not route through an invalid placeholder session",
+                text.contains("Expected a string starting with"))
+        } finally {
+            tui.destroy()
+            if (!tui.waitFor(5, TimeUnit.SECONDS)) {
+                tui.destroyForcibly()
+                tui.waitFor(5, TimeUnit.SECONDS)
+            }
+            tui.inputStream.close()
+            tui.outputStream.close()
+            reader.join(1000)
         }
     }
 }

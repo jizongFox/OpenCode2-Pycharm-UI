@@ -68,7 +68,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val cli = OpenCodeCli()
     private val connectionLifecycle = ConnectionLifecycle { project.isDisposed }
     @Volatile private var localServerProcess: Process? = null
-    @Volatile private var localServerStarting = false
+    @Volatile private var terminalStarting = false
 
     @Volatile
     private var connection: ServerConnection? = null
@@ -163,7 +163,7 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private fun focusOrCreateTerminalNow(interactive: Boolean) {
         val current = connection
-        if (localServerStarting) return
+        if (terminalStarting) return
         if (hasRunningTerminal()) {
             if (interactive) terminalHost.focus()
             return
@@ -300,14 +300,20 @@ class OpenCodeService(private val project: Project) : Disposable {
                 configureWorkspace(config.workingDirectory)
                 connection = config
                 apiClient = newApiClient(config)
+                terminalStarting = true
                 startConnectionManager(config.generation)
             }) return
         AppExecutorUtil.getAppExecutorService().submit {
             val binary = cli.detect()
             invokeForConnection(config.generation) {
-                if (!hasRunningTerminal()) {
-                    if (binary != null) createTerminalUi(config, binary, continueSession = true)
-                    else {
+                when {
+                    hasRunningTerminal() -> {
+                        terminalStarting = false
+                        promptDelivery.resume()
+                    }
+                    binary != null -> openTerminalUi(config, binary)
+                    else -> {
+                        terminalStarting = false
                         promptDelivery.pause(clearPending = true)
                         showCliNotFoundError()
                     }
@@ -321,14 +327,14 @@ class OpenCodeService(private val project: Project) : Disposable {
         if (!connectionLifecycle.update(config.generation) {
                 configureWorkspace(config.workingDirectory)
                 connection = config
-                localServerStarting = true
+                terminalStarting = true
             }) return
         AppExecutorUtil.getAppExecutorService().submit {
             try {
                 val binary = cli.detect()
                 if (binary == null) {
                     invokeForConnection(config.generation) {
-                        localServerStarting = false
+                        terminalStarting = false
                         promptDelivery.pause(clearPending = true)
                         showCliNotFoundError()
                     }
@@ -352,9 +358,8 @@ class OpenCodeService(private val project: Project) : Disposable {
                     try {
                         connectionLifecycle.update(config.generation) {
                             apiClient = newApiClient(config)
-                            createTerminalUi(config, binary, continueSession = true)
+                            openTerminalUi(config, binary)
                             startConnectionManager(config.generation)
-                            localServerStarting = false
                         }
                     } catch (e: Exception) {
                         disconnectAndReset()
@@ -371,19 +376,42 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    private fun createTerminalUi(
+    /** Resolve history off the UI thread; only a current connection may publish the terminal. */
+    private fun openTerminalUi(
         config: ServerConnection,
-        command: String = cli.command(),
-        continueSession: Boolean
+        command: String = cli.command()
     ) {
-        connectionLifecycle.update(config.generation) {
-            val launchCommand = cli.buildCommand(
-                command, config.hostname, config.port, config.password, continueSession
-            )
-            terminalHost.create(
-                config.workingDirectory, "$OPEN_CODE_TAB_PREFIX(${config.port})", launchCommand
-            )
-            promptDelivery.resume()
+        if (!connectionLifecycle.update(config.generation) { terminalStarting = true }) return
+        AppExecutorUtil.getAppExecutorService().submit {
+            if (!connectionLifecycle.isCurrent(config.generation)) return@submit
+            val sessionId = try {
+                normalizeWorkspace(config.workingDirectory)?.let { newApiClient(config).getLatestSessionId(it) }
+            } catch (e: Exception) {
+                logger.warn("[OpenCode] Could not select the previous session; opening the home screen", e)
+                null
+            }
+            invokeForConnection(config.generation) {
+                connectionLifecycle.update(config.generation) {
+                    try {
+                        if (hasRunningTerminal()) terminalHost.focus()
+                        else {
+                            val launchCommand = cli.buildCommand(
+                                command, config.hostname, config.port, config.password, sessionId
+                            )
+                            terminalHost.create(
+                                config.workingDirectory, "$OPEN_CODE_TAB_PREFIX(${config.port})", launchCommand
+                            )
+                        }
+                        promptDelivery.resume()
+                    } catch (e: Exception) {
+                        logger.warn("[OpenCode] Failed to create terminal UI", e)
+                        disconnectAndReset()
+                        Messages.showErrorDialog(project, e.message ?: "Cannot open OpenCode terminal", "OpenCode")
+                    } finally {
+                        connectionLifecycle.update(config.generation) { terminalStarting = false }
+                    }
+                }
+            }
         }
     }
 
@@ -532,18 +560,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             terminalHost.focus()
             return
         }
-        try {
-            createTerminalUi(config, continueSession = true)
-        } catch (e: Exception) {
-            logger.warn("[OpenCode] Failed to create terminal UI", e)
-            invokeForConnection(config.generation) {
-                Messages.showErrorDialog(
-                    project,
-                    "Failed to create terminal: ${e.message}",
-                    "OpenCode"
-                )
-            }
-        }
+        openTerminalUi(config)
     }
 
     private fun restartServer(config: ServerConnection) {
@@ -606,7 +623,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             )
             connection = null
             apiClient = null
-            localServerStarting = false
+            terminalStarting = false
             isConnected.set(false)
             isConnecting.set(false)
             isConnectionDialogOpen.set(false)
