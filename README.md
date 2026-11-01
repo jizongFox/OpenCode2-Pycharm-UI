@@ -1,4 +1,4 @@
-# OpenCode UI for JetBrains (V2) — 2.2.4
+# OpenCode UI for JetBrains (V2) — 2.2.5
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
@@ -65,7 +65,9 @@ Empty-file additions/deletions are reviewable only when Git patch metadata prove
 | `PromptDelivery` | Ordered citations, bounded retries after terminal creation, and reset cancellation |
 | `OpenCodeApiClient` | Readiness, events, session projections and per-turn diffs |
 | `ReviewCoordinator` | Match busy/idle with the first delivered user message and guard review UI callbacks |
+| `ReviewDiffAction` | Shared Accept/Reject availability, confirmation and completion handling |
 | `SessionManager` | Current turn, pending file reviews, and guarded accept/reject |
+| `DiffViewerService` | Review view identity, placement and next-file navigation |
 
 The V2 API does not expose a prompt-append route. The plugin writes references to its own terminal TTY after startup, without submitting them. The terminal shell is replaced by the OpenCode TUI on Unix-like systems so exiting the TUI ends that process. A terminal that takes unusually long to initialize may require retrying the shortcut.
 
@@ -79,12 +81,12 @@ cd OpenCode2-Pycharm-UI
 python3 scripts/build_release.py
 ```
 
-It resolves the latest official stable PyCharm release, verifies the SDK download checksum, caches the SDK and bootstrap JDK, configures Java's proxy from `HTTP_PROXY`/`HTTPS_PROXY`, and runs the Gradle wrapper for tests, packaging, structure checks, and then Plugin Verifier. EAP and RC builds are excluded. Later runs reuse `~/.cache/opencode-ui-build`; `--cache-dir PATH` selects another cache. `--skip-verifier` runs tests and packaging; `--verify-only` resumes compatibility verification; `--verbose` includes dependency diagnostics. Java and Kotlin targets follow the selected SDK's required Java version.
+It resolves the latest official stable PyCharm release, verifies the SDK download checksum, caches the SDK and bootstrap JDK, configures Java's proxy from `HTTP_PROXY`/`HTTPS_PROXY`, and runs the Gradle wrapper for a clean build, tests, packaging, structure checks, and then Plugin Verifier. Generated IDE sandboxes live under `build/sandbox`, so the release clean removes old plugin JARs before packaging. SDK and bootstrap JDK caches are retained. EAP and RC builds are excluded. Later runs reuse `~/.cache/opencode-ui-build`; `--cache-dir PATH` selects another cache. `--skip-verifier` runs tests and packaging; `--verify-only` resumes compatibility verification; `--verbose` includes dependency diagnostics. Java and Kotlin targets follow the selected SDK's required Java version.
 
 For a manually prepared environment, use the Gradle wrapper directly. Supply `-PlocalIdePath=/path/to/pycharm` to reuse an installed SDK and register its bundled JBR with Gradle's `org.gradle.java.installations.paths` property. The exact default SDK version is pinned in `build.gradle.kts` for reproducibility; the release script resolves the stable version anew on each run and passes it explicitly.
 
 ```bash
-./gradlew test buildPlugin
+./gradlew clean test buildPlugin
 ```
 
 The installable ZIP is generated under `build/distributions/`. Use **Settings → Plugins → Install Plugin from Disk** to install it.
@@ -97,7 +99,7 @@ OPENCODE_TEST_BINARY=/path/to/opencode python3 scripts/build_release.py
 
 This optional test starts a private authenticated loopback server with isolated config/data directories. It verifies readiness, rejected credentials, startup session selection, session projections, and enqueue/cancel SSE payloads. On Linux, it also launches the real TUI in a PTY using the plugin's generated command, both without history and with an existing session, and checks for the startup session-ID error. It admits a prompt with `resume: false`, so it sends no model request and needs no provider credentials. Normal builds skip this check when the variable is absent. Native editor focus and window behavior still require a real PyCharm installation check.
 
-Release 2.2.4 passed 82 tests, including the real OpenCode 2.2.5 HTTP/SSE contract and both Linux TUI startup paths; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with the existing scheduled-for-removal, deprecated, and experimental API notices.
+Release 2.2.5 passed 88 tests, including the shared review actions, real OpenCode 2.2.5 HTTP/SSE contract and both Linux TUI startup paths; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with the existing scheduled-for-removal, deprecated, and experimental API notices.
 
 ## License
 

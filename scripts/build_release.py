@@ -91,7 +91,7 @@ def main():
     # Wrapper bootstrap and the Gradle build both need these properties.
     env["GRADLE_OPTS"] = env.get("GRADLE_OPTS", "") + " " + shlex.join(proxy_options)
     env["JAVA_TOOL_OPTIONS"] = env.get("JAVA_TOOL_OPTIONS", "") + " " + shlex.join(proxy_options)
-    tasks = ["test", "buildPlugin", "verifyPluginStructure"]
+    tasks = ["clean", "test", "buildPlugin", "verifyPluginStructure"]
     command = ["bash", "./gradlew", "--no-daemon", "--max-workers=2",
                "-Dorg.gradle.jvmargs=-Xmx2048m",
                f"-Porg.gradle.java.installations.paths={jdk},{sdk / 'jbr'}",

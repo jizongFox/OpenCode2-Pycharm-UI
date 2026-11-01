@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "2.2.4"
+version = "2.2.5"
 val pycharmVersion = providers.gradleProperty("pycharmVersion").getOrElse("2026.2.4")
 val targetJavaVersion = providers.gradleProperty("targetJavaVersion").getOrElse("25")
 
@@ -44,6 +44,9 @@ dependencies {
 }
 
 intellijPlatform {
+    // Keep generated plugin staging under build so a release clean removes older versions.
+    sandboxContainer.set(layout.buildDirectory.dir("sandbox"))
+
     pluginConfiguration {
         ideaVersion {
             sinceBuild = "262"
@@ -51,12 +54,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>2.2.4</h2>
+            <h2>2.2.5</h2>
             <ul>
-                <li>Fixes the sessionID validation error when opening OpenCode in a project without history.</li>
-                <li>Restores an existing root session by its real ID instead of using unconditional --continue.</li>
-                <li>Resolves history off the UI thread and keeps startup callbacks tied to the connection generation.</li>
-                <li>Opens the home screen when no matching session is available.</li>
+                <li>Provides consistent Accept/Reject availability, completion messages and review navigation.</li>
+                <li>Accept stages reviewed files; Reject confirms before restoring files or removing added files.</li>
+                <li>Restores existing sessions by their real IDs and opens new workspaces without session-ID errors.</li>
             </ul>
         """.trimIndent()
     }
