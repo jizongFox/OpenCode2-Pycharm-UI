@@ -110,7 +110,7 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 │   └── models/                 # V2 event and diff models
 ├── diff/                       # FEATURE: Diff Viewer & Code Review
 │   ├── DiffViewerService.kt    # Manages the IDE Diff Window
-│   └── OpenCodeDiffEditorActions.kt # Accept/Reject logic
+│   └── ReviewDiffAction.kt     # Shared Accept/Reject action handling
 ├── session/                    # STATE: Session & File Management
 │   └── SessionManager.kt       # Tracks active session, file snapshots, and history
 ├── terminal/                   # INTEGRATION: Embedded Terminal

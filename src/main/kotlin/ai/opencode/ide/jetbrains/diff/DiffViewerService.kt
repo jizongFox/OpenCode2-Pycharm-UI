@@ -54,8 +54,8 @@ open class DiffViewerService(private val project: Project) : Disposable {
                 "Original", "Modified (OpenCode)"
             ).apply {
                 putUserData(DiffUserDataKeys.CONTEXT_ACTIONS, listOf(
-                    AcceptFromDiffEditorAction(entry) { onEntryApplied(view, entry) },
-                    RejectFromDiffEditorAction(entry) { onEntryApplied(view, entry) }
+                    ReviewDiffAction(entry, ReviewOperation.ACCEPT) { onEntryApplied(view, entry) },
+                    ReviewDiffAction(entry, ReviewOperation.REJECT) { onEntryApplied(view, entry) }
                 ))
             }
         }
