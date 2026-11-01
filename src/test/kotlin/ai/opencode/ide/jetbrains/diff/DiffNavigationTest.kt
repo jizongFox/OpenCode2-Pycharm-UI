@@ -160,7 +160,7 @@ class DiffNavigationTest : BasePlatformTestCase() {
     private fun rejectFirst(chain: SimpleDiffRequestChain) {
         val request = chain.listSelection.list.first().process(UserDataHolderBase(), EmptyProgressIndicator())
         val action = checkNotNull(request.getUserData(DiffUserDataKeys.CONTEXT_ACTIONS))
-            .filterIsInstance<RejectFromDiffEditorAction>().single()
+            .single { it.templatePresentation.text == "Reject" }
         val context = MapDataContext()
         context.put(CommonDataKeys.PROJECT, project)
         // This key can refer to a source file. Navigation must never use it to close a review.
