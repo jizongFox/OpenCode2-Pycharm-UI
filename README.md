@@ -1,4 +1,4 @@
-# OpenCode UI for JetBrains (V2) — 2.2.5
+# OpenCode UI for JetBrains (V2) — 2.2.6
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
@@ -14,6 +14,8 @@ OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows
 3. Select code in the editor and press `Ctrl+Alt+K` (`Option+Cmd+K` on macOS). The plugin appends a file reference to the TUI composer and focuses it after insertion. Edit your request and press Enter to submit it.
 
 The selection syntax is `@src/example.kt#10-25`. With no selection it uses `@src/example.kt`; Project View selections can include multiple files. Clicking the OpenCode sidebar icon also opens the editor tab. Closing the tab leaves the terminal running; the next launch reopens the same session. The plugin does not open a connection on IDE startup.
+
+A new terminal opens to the right of the current source editor. With no file open, it uses a single editor window. Later launches reuse its editor tab or visible detached window. Creating the terminal does not create or activate a tab in the IDE's Terminal tool window.
 
 When a new TUI process is needed, the plugin looks up the newest root session in the configured working directory and opens it with `--session` and its real ID. A project without history opens the home screen. If the lookup fails or returns an invalid/unrelated session, the home screen still opens and existing history remains available through the TUI. The plugin does not pass `--continue`: OpenCode 2.2.5 can route that option through a temporary `dummy` session and display a session-ID validation error.
 
@@ -99,7 +101,7 @@ OPENCODE_TEST_BINARY=/path/to/opencode python3 scripts/build_release.py
 
 This optional test starts a private authenticated loopback server with isolated config/data directories. It verifies readiness, rejected credentials, startup session selection, session projections, and enqueue/cancel SSE payloads. On Linux, it also launches the real TUI in a PTY using the plugin's generated command, both without history and with an existing session, and checks for the startup session-ID error. It admits a prompt with `resume: false`, so it sends no model request and needs no provider credentials. Normal builds skip this check when the variable is absent. Native editor focus and window behavior still require a real PyCharm installation check.
 
-Release 2.2.5 passed 88 tests, including the shared review actions, real OpenCode 2.2.5 HTTP/SSE contract and both Linux TUI startup paths; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with the existing scheduled-for-removal, deprecated, and experimental API notices.
+The 2.2.6 build passed 95 tests, including seven SDK editor placement and lifecycle cases, shared review actions, the real OpenCode 2.2.5 HTTP/SSE contract and both Linux TUI startup paths; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with five deprecated and six experimental API notices.
 
 ## License
 

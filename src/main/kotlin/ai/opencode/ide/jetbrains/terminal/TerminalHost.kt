@@ -5,9 +5,11 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.util.concurrency.AppExecutorUtil
+import org.jetbrains.plugins.terminal.LocalTerminalDirectRunner
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
-import org.jetbrains.plugins.terminal.TerminalView
+import org.jetbrains.plugins.terminal.ShellStartupOptions
 import java.awt.BorderLayout
 import java.awt.event.KeyEvent
 import java.util.concurrent.CompletableFuture
@@ -53,8 +55,12 @@ class TerminalHost(
     fun create(workingDirectory: String?, title: String, command: String) {
         disposeWidget()
 
-        val newWidget = TerminalView.getInstance(project)
-            .createLocalShellWidget(workingDirectory, title)
+        // Create the editor's terminal directly: a Terminal tool-window tab would
+        // own its lifetime and could become visible before editor placement.
+        val terminal = LocalTerminalDirectRunner.createTerminalRunner(project).startShellTerminalWidget(
+            project, ShellStartupOptions.Builder().workingDirectory(workingDirectory).build(), true
+        )
+        val newWidget = ShellTerminalWidget.toShellJediTermWidgetOrThrow(terminal)
         OpenCodeTerminalLinkFilter.install(project, newWidget, resolvePath)
         newWidget.terminalPanel.addPreKeyEventHandler { event ->
             handleTerminalEscapeKey(event) {
@@ -178,7 +184,7 @@ class TerminalHost(
         val oldFile = file
         file = null
         try {
-            widget?.dispose()
+            widget?.let(Disposer::dispose)
         } catch (_: Exception) {
             // Disposal is idempotent from the host's perspective.
         } finally {
