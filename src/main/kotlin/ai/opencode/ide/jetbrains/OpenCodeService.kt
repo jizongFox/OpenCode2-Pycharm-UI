@@ -210,7 +210,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    /** TerminalView cannot create a usable widget while the IDE is indexing. */
+    /** Defer new terminal widgets during indexing; existing terminals remain available. */
     private fun whenTerminalCreationIsAvailable(action: () -> Unit) {
         if (hasRunningTerminal() || !DumbService.isDumb(project)) {
             action()
