@@ -10,7 +10,7 @@ OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows
 ## Use
 
 1. Choose **Tools → Open OpenCode** or press `Ctrl+\` (`Cmd+Esc` on macOS).
-2. Enter the local address shown in the dialog. If the port is free, the plugin starts `opencode serve` and opens `opencode --server` in a right-side editor tab. If an OpenCode V2 server is already listening, enter its password to attach to it.
+2. Choose **Start a local server** to let the plugin select a port and start `opencode serve` for the project. To attach to a running instance, choose **Connect to an existing server** and enter its address and password if required. Both choices open the TUI in the editor.
 3. Select code in the editor and press `Ctrl+Alt+K` (`Option+Cmd+K` on macOS). The plugin appends a file reference to the TUI composer and focuses it after insertion. Edit your request and press Enter to submit it.
 
 The selection syntax is `@src/example.kt#10-25`. With no selection it uses `@src/example.kt`; Project View selections can include multiple files. Clicking the OpenCode sidebar icon also opens the editor tab. Closing the tab leaves the terminal running; the next launch reopens the same session. The plugin does not open a connection on IDE startup.
