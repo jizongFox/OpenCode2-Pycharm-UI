@@ -30,6 +30,7 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
     private val uiCallbacks = ConcurrentLinkedQueue<Runnable>()
     private val notifications = CopyOnWriteArrayList<Notification>()
     private val reviews = CopyOnWriteArrayList<List<DiffEntry>>()
+    private var initialReviewIndex: Int? = null
     private val errors = CopyOnWriteArrayList<Throwable>()
     private val received = CopyOnWriteArrayList<OpenCodeEvent>()
 
@@ -50,6 +51,7 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
         manager.configureWorkspaceRoot(root.path)
         val viewer = object : DiffViewerService(project) {
             override fun showMultiFileDiff(entries: List<DiffEntry>, initialIndex: Int?) {
+                initialReviewIndex = initialIndex
                 reviews.add(entries)
             }
         }
@@ -127,6 +129,32 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
         finish()
         awaitReview(count = 2)
 
+        assertEquals(listOf("msg_first", "msg_second"), server.requestedTurns)
+    }
+
+    fun testNextReviewKeepsThePreviousPendingFileAndStartsAtTheNewFile() {
+        File(root, "later.txt").writeText("updated\n")
+        server.respondTo("msg_second", gson.toJson(mapOf("data" to listOf(mapOf(
+            "file" to "later.txt", "patch" to "@@ -1 +1 @@\n-original\n+updated\n",
+            "additions" to 1, "deletions" to 1, "status" to "modified"
+        )))))
+        enqueue("msg_first")
+        start()
+        deliver("msg_first")
+        finish()
+        awaitReview()
+        val previousEntry = reviews.single().single()
+
+        enqueue("msg_second")
+        start()
+        deliver("msg_second")
+        finish()
+        awaitReview(count = 2)
+
+        val entries = reviews.last()
+        assertEquals(listOf("review.txt", "later.txt"), entries.map { it.file })
+        assertSame(previousEntry, entries.first())
+        assertEquals(1, initialReviewIndex)
         assertEquals(listOf("msg_first", "msg_second"), server.requestedTurns)
     }
 

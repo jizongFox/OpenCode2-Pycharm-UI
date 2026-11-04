@@ -151,8 +151,9 @@ class ReviewCoordinator(
             }
             if (entries.isEmpty()) return
             invokeForReview(token) {
-                val pending = entries.filter(manager::isPending)
-                if (pending.isNotEmpty()) diffViewerService().showMultiFileDiff(pending)
+                val pending = manager.getAllDiffEntries()
+                val firstNewIndex = pending.indexOfFirst { entry -> entries.any { it === entry } }
+                if (firstNewIndex >= 0) diffViewerService().showMultiFileDiff(pending, firstNewIndex)
             }
         } catch (e: Exception) {
             logger.warn("[OpenCode] Failed to review turn ${snapshot.turnNumber}", e)
