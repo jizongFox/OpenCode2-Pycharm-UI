@@ -1,4 +1,4 @@
-# OpenCode UI for JetBrains (V2) — 2.2.6
+# OpenCode UI for JetBrains (V2) — 2.2.7
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
@@ -93,6 +93,8 @@ For a manually prepared environment, use the Gradle wrapper directly. Supply `-P
 
 The installable ZIP is generated under `build/distributions/`. Use **Settings → Plugins → Install Plugin from Disk** to install it.
 
+The Debian package installs that ZIP at `/usr/share/opencode-ui-pycharm/OpenCode_UI-2.2.7.zip`. After installing the package, select this ZIP in PyCharm's **Install Plugin from Disk** dialog.
+
 To include the real-release contract check, point `OPENCODE_TEST_BINARY` at an official V2 executable before building:
 
 ```bash
@@ -101,7 +103,7 @@ OPENCODE_TEST_BINARY=/path/to/opencode python3 scripts/build_release.py
 
 This optional test starts a private authenticated loopback server with isolated config/data directories. It verifies readiness, rejected credentials, startup session selection, session projections, and enqueue/cancel SSE payloads. On Linux, it also launches the real TUI in a PTY using the plugin's generated command, both without history and with an existing session, and checks for the startup session-ID error. It admits a prompt with `resume: false`, so it sends no model request and needs no provider credentials. Normal builds skip this check when the variable is absent. Native editor focus and window behavior still require a real PyCharm installation check.
 
-The 2.2.6 build passed 95 tests, including seven SDK editor placement and lifecycle cases, shared review actions, the real OpenCode 2.2.5 HTTP/SSE contract and both Linux TUI startup paths; three historical external-CLI cases remain skipped. The standard build resolved the latest stable PyCharm 2026.2.4 (262.11879.98). Compilation and plugin structure checks passed; Plugin Verifier reported Compatible with five deprecated and six experimental API notices.
+The 2.2.7 build passed 99 tests, including the OpenCode 2.2.5 live HTTP/SSE and Linux TUI startup checks. Three historical external-CLI tests were skipped. The standard build resolved stable PyCharm 2026.2.4 (262.11879.98). Plugin structure checks passed and Plugin Verifier reported Compatible with five deprecated and six experimental API notices.
 
 ## License
 

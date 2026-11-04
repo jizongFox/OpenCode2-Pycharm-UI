@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "2.2.6"
+version = "2.2.7"
 val pycharmVersion = providers.gradleProperty("pycharmVersion").getOrElse("2026.2.4")
 val targetJavaVersion = providers.gradleProperty("targetJavaVersion").getOrElse("25")
 
@@ -54,11 +54,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>2.2.6</h2>
+            <h2>2.2.7</h2>
             <ul>
-                <li>Creates the OpenCode terminal directly in the editor, without activating a Terminal tool-window tab.</li>
-                <li>Opens beside the source on the right and reuses existing editor tabs and detached windows.</li>
-                <li>Releases terminal resources through the IDE disposal lifecycle when the connection is reset.</li>
+                <li>Reports successful, failed, and interrupted turns, with failure details in the IDE.</li>
+                <li>Keeps unresolved files visible when the next turn opens a review.</li>
+                <li>Separates local server startup from connections to existing servers.</li>
             </ul>
         """.trimIndent()
     }
