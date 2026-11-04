@@ -3,12 +3,18 @@ package ai.opencode.ide.jetbrains.api.models
 import com.google.gson.JsonDeserializationContext
 import com.google.gson.JsonDeserializer
 import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
 import java.lang.reflect.Type
 
 /** Public V2 events used for turn review. Other events need no model here. */
 sealed class OpenCodeEvent(open val type: String)
 
-data class SessionExecutionData(val sessionID: String, val reason: String? = null)
+data class SessionExecutionData(
+    val sessionID: String,
+    val reason: String? = null,
+    val errorMessage: String? = null
+)
 data class SessionExecutionEvent(
     override val type: String, val data: SessionExecutionData, val created: Long? = null
 ) : OpenCodeEvent(type)
@@ -33,9 +39,13 @@ class OpenCodeEventDeserializer : JsonDeserializer<OpenCodeEvent> {
         val type = value.get("type")?.asString ?: return UnknownEvent("unknown")
         return when (type) {
             "session.execution.started", "session.execution.succeeded",
-            "session.execution.failed", "session.execution.interrupted" ->
-                SessionExecutionEvent(type, context.deserialize(value.get("data"), SessionExecutionData::class.java),
-                    value.get("created")?.asLong)
+            "session.execution.failed", "session.execution.interrupted" -> {
+                val payload = value.getAsJsonObject("data")
+                val data = context.deserialize<SessionExecutionData>(payload, SessionExecutionData::class.java)
+                val error = payload.get("error") as? JsonObject
+                val message = (error?.get("message") as? JsonPrimitive)?.takeIf { it.isString }?.asString
+                SessionExecutionEvent(type, data.copy(errorMessage = message), value.get("created")?.asLong)
+            }
             "session.inbox.enqueued" -> context.deserialize(json, InboxEnqueuedEvent::class.java)
             "session.inbox.delivered" -> context.deserialize(json, InboxDeliveredEvent::class.java)
             "session.inbox.cancelled" -> context.deserialize(json, InboxCancelledEvent::class.java)
