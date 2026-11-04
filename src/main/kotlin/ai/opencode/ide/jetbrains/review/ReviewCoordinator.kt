@@ -15,6 +15,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.SystemNotifications
 import com.intellij.util.concurrency.AppExecutorUtil
@@ -67,9 +68,9 @@ class ReviewCoordinator(
             is SessionExecutionEvent -> when (event.type) {
                 "session.execution.started" -> start(event.data.sessionID, event.created)
                 "session.execution.interrupted" -> {
-                    if (event.data.reason != "shutdown") finish(event.data.sessionID)
+                    if (event.data.reason != "shutdown") finish(event.data.sessionID, event.type)
                 }
-                else -> finish(event.data.sessionID)
+                else -> finish(event.data.sessionID, event.type, event.data.errorMessage)
             }
             else -> Unit
         }
@@ -119,12 +120,12 @@ class ReviewCoordinator(
         }
     }
 
-    private fun finish(id: String) {
+    private fun finish(id: String, eventType: String? = null, errorMessage: String? = null) {
         val turn = activeTurn?.takeIf { it.sessionId == id } ?: return
         val snapshot = sessionManager().onTurnEnd() ?: return
         activeTurn = null
         val token = generation
-        notifyTaskCompleted(token)
+        notifyTaskEnded(token, eventType, errorMessage)
         // V2 persists the turn diff at idle. A short delay lets the projection finish.
         AppExecutorUtil.getAppScheduledExecutorService().schedule(
             { fetch(id, turn.messageId, snapshot, token, 0) }, 200, TimeUnit.MILLISECONDS
@@ -182,19 +183,29 @@ class ReviewCoordinator(
         }
     }
 
-    private fun notifyTaskCompleted(token: Long) {
+    private fun notifyTaskEnded(token: Long, eventType: String?, errorMessage: String?) {
+        val (title, severity) = when (eventType) {
+            "session.execution.succeeded" -> "OpenCode Task Completed" to NotificationType.INFORMATION
+            "session.execution.failed" -> "OpenCode Task Failed" to NotificationType.WARNING
+            "session.execution.interrupted" -> "OpenCode Task Interrupted" to NotificationType.WARNING
+            else -> "OpenCode Turn Ended" to NotificationType.INFORMATION
+        }
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
         val message = "[$timestamp] Session is now idle. Checking for changes..."
+        val detail = errorMessage?.trim()?.take(500)?.takeIf { it.isNotEmpty() }
+        val content = if (eventType == "session.execution.failed" && detail != null) {
+            "$message<br>${StringUtil.escapeXmlEntities(detail)}"
+        } else message
         invokeForReview(token) {
             try {
                 lastIdleNotification?.expire()
                 val notification = NotificationGroupManager.getInstance()
                     .getNotificationGroup("OpenCode")
-                    .createNotification("OpenCode Task Completed", message, NotificationType.INFORMATION)
+                    .createNotification(title, content, severity)
                     .setImportant(true)
                 lastIdleNotification = notification
                 notification.notify(project)
-                SystemNotifications.getInstance().notify("OpenCode", "OpenCode Task Completed", message)
+                SystemNotifications.getInstance().notify("OpenCode", title, message)
             } catch (e: Throwable) {
                 logger.debug("[OpenCode] Task notification failed: ${e.message}")
             }

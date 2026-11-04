@@ -10,6 +10,7 @@ import ai.opencode.ide.jetbrains.review.ReviewCoordinator
 import ai.opencode.ide.jetbrains.session.SessionManager
 import com.google.gson.Gson
 import com.intellij.notification.Notification
+import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
 import com.intellij.openapi.components.service
 import com.intellij.testFramework.PlatformTestUtil
@@ -219,6 +220,25 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
         awaitReview()
 
         assertEquals(listOf("msg_first"), server.requestedTurns)
+        assertEquals("OpenCode Task Interrupted", notifications.single().title)
+        assertEquals(NotificationType.WARNING, notifications.single().type)
+    }
+
+    fun testFailedExecutionReportsTheErrorAndReviewsPartialChanges() {
+        enqueue("msg_first")
+        start()
+        deliver("msg_first")
+        event("session.execution.failed", mapOf(
+            "sessionID" to "ses_main", "error" to mapOf("message" to "Model <example> is unavailable")
+        ), directory = null)
+
+        awaitReview()
+
+        val notification = notifications.single()
+        assertEquals("OpenCode Task Failed", notification.title)
+        assertEquals(NotificationType.WARNING, notification.type)
+        assertTrue(notification.content.contains("Model &lt;example&gt; is unavailable"))
+        assertEquals(listOf("msg_first"), server.requestedTurns)
     }
 
     fun testAbsenceFromActiveListDoesNotCompleteARecoverableTurn() {
@@ -243,6 +263,7 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
 
         awaitReview()
         assertEquals(listOf("msg_first"), server.requestedTurns)
+        assertEquals("OpenCode Turn Ended", notifications.single().title)
     }
 
     fun testOlderServersCanUseTheExecutionTimestampWhenBusyIsAbsent() {
