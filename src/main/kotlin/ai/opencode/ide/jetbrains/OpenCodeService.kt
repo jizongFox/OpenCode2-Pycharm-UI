@@ -68,7 +68,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val cli = OpenCodeCli()
     private val connectionLifecycle = ConnectionLifecycle { project.isDisposed }
     @Volatile private var localServerProcess: Process? = null
-    @Volatile private var terminalStarting = false
+    @Volatile private var terminalOpening = false
 
     @Volatile
     private var connection: ServerConnection? = null
@@ -81,7 +81,6 @@ class OpenCodeService(private val project: Project) : Disposable {
     private var connectionManagerTask: ScheduledFuture<*>? = null
     private val isConnected = AtomicBoolean(false)
     private val isConnecting = AtomicBoolean(false)
-    private val isConnectionDialogOpen = AtomicBoolean(false)
     private var wasEverConnected = false
     private var reconnectFailures = 0
     private var reconnectDialogShown = false
@@ -101,6 +100,8 @@ class OpenCodeService(private val project: Project) : Disposable {
     internal var pasteToTerminal: (String) -> Boolean = terminalHost::appendPrompt
     internal var focusAfterPaste: () -> Unit = terminalHost::focus
     internal var hasRunningTerminal: () -> Boolean = terminalHost::isOpen
+    internal var chooseConnection: (OpenCodeConnectDialog.ConnectionInfo.ExistingServer?) ->
+        OpenCodeConnectDialog.ConnectionInfo? = { OpenCodeConnectDialog.show(project, it) }
 
     private val promptDelivery = PromptDelivery(
         paste = { text ->
@@ -162,24 +163,26 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun focusOrCreateTerminalNow(interactive: Boolean) {
-        val current = connection
-        if (terminalStarting) return
         if (hasRunningTerminal()) {
             if (interactive) terminalHost.focus()
             return
         }
+        val token = connectionLifecycle.current()
+        if (!beginTerminalOpen(token)) return
+        val current = connection
         if (current == null) {
-            showConnectionDialog()
+            showConnectionDialog(token)
             return
         }
 
         AppExecutorUtil.getAppExecutorService().submit {
+            if (!connectionLifecycle.isCurrent(token)) return@submit
             val running = newApiClient(current).probe() == ConnectionProbe.Ready
-            invokeForConnection(current.generation) {
+            invokeForConnection(token) {
                 if (!running) isConnected.set(false)
                 when {
                     interactive -> showReconnectOrNewDialog(current, running)
-                    running -> restoreUi(current)
+                    running -> ensureTerminalUi(current)
                     else -> showReconnectOrNewDialog(current, false)
                 }
             }
@@ -204,9 +207,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             invokeForConnection(connectionLifecycle.current()) { terminalHost.show() }
             promptDelivery.resume()
         } else {
-            promptDelivery.pause(clearPending = false)
-            if (connection == null) showConnectionDialog()
-            else focusOrCreateTerminalNow(interactive = false)
+            focusOrCreateTerminalNow(interactive = false)
         }
     }
 
@@ -231,23 +232,43 @@ class OpenCodeService(private val project: Project) : Disposable {
         })
     }
 
-    private fun showConnectionDialog(retry: OpenCodeConnectDialog.ConnectionInfo.ExistingServer? = null) {
-        if (project.isDisposed || !isConnectionDialogOpen.compareAndSet(false, true)) return
-        val token = connectionLifecycle.current()
-        invokeForConnection(token) {
-            try {
-                val choice = OpenCodeConnectDialog.show(project, retry)
-                if (!connectionLifecycle.isCurrent(token)) return@invokeForConnection
-                if (choice != null) processConnectionChoice(choice)
-                else promptDelivery.pause(clearPending = true)
-            } finally {
-                isConnectionDialogOpen.set(false)
+    private fun beginTerminalOpen(token: Long): Boolean {
+        var started = false
+        connectionLifecycle.update(token) {
+            if (!terminalOpening) {
+                terminalOpening = true
+                promptDelivery.pause(clearPending = false)
+                started = true
             }
+        }
+        return started
+    }
+
+    private fun finishTerminalOpen(token: Long, clearPending: Boolean = false) {
+        connectionLifecycle.update(token) {
+            terminalOpening = false
+            if (clearPending) promptDelivery.pause(clearPending = true)
+        }
+    }
+
+    private fun showConnectionDialog(
+        token: Long, retry: OpenCodeConnectDialog.ConnectionInfo.ExistingServer? = null
+    ) {
+        invokeForConnection(token) {
+            val choice = try {
+                chooseConnection(retry)
+            } catch (e: Exception) {
+                finishTerminalOpen(token)
+                throw e
+            }
+            if (!connectionLifecycle.isCurrent(token)) return@invokeForConnection
+            if (choice != null) processConnectionChoice(choice)
+            else finishTerminalOpen(token, clearPending = true)
         }
     }
 
     private fun processConnectionChoice(choice: OpenCodeConnectDialog.ConnectionInfo) {
-        val reset = disconnectAndReset(clearPendingPastes = false)
+        val reset = disconnectAndReset(clearPendingPastes = false, continueOpening = true)
         reset.shutdown.whenComplete { _, _ ->
             AppExecutorUtil.getAppExecutorService().submit {
                 if (!connectionLifecycle.isCurrent(reset.generation)) return@submit
@@ -259,6 +280,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                         } catch (e: Exception) {
                             logger.warn("[OpenCode] Failed to find an available port", e)
                             invokeForConnection(reset.generation) {
+                                finishTerminalOpen(reset.generation)
                                 Messages.showWarningDialog(project, "No available local OpenCode port.", "Start Failed")
                             }
                             return@submit
@@ -275,7 +297,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                             if (probe == ConnectionProbe.Ready) connectToExistingServer(config)
                             else {
                                 showConnectionFailure(probe)
-                                if (connectionLifecycle.isCurrent(config.generation)) showConnectionDialog(choice)
+                                showConnectionDialog(config.generation, choice)
                             }
                         }
                     }
@@ -302,7 +324,6 @@ class OpenCodeService(private val project: Project) : Disposable {
                 configureWorkspace(config.workingDirectory)
                 connection = config
                 apiClient = newApiClient(config)
-                terminalStarting = true
                 startConnectionManager(config.generation)
             }) return
         AppExecutorUtil.getAppExecutorService().submit {
@@ -310,13 +331,12 @@ class OpenCodeService(private val project: Project) : Disposable {
             invokeForConnection(config.generation) {
                 when {
                     hasRunningTerminal() -> {
-                        terminalStarting = false
+                        finishTerminalOpen(config.generation)
                         promptDelivery.resume()
                     }
                     binary != null -> openTerminalUi(config, binary)
                     else -> {
-                        terminalStarting = false
-                        promptDelivery.pause(clearPending = true)
+                        finishTerminalOpen(config.generation, clearPending = true)
                         showCliNotFoundError()
                     }
                 }
@@ -329,15 +349,13 @@ class OpenCodeService(private val project: Project) : Disposable {
         if (!connectionLifecycle.update(config.generation) {
                 configureWorkspace(config.workingDirectory)
                 connection = config
-                terminalStarting = true
             }) return
         AppExecutorUtil.getAppExecutorService().submit {
             try {
                 val binary = cli.detect()
                 if (binary == null) {
                     invokeForConnection(config.generation) {
-                        terminalStarting = false
-                        promptDelivery.pause(clearPending = true)
+                        finishTerminalOpen(config.generation, clearPending = true)
                         showCliNotFoundError()
                     }
                     return@submit
@@ -383,7 +401,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         config: ServerConnection,
         command: String = cli.command()
     ) {
-        if (!connectionLifecycle.update(config.generation) { terminalStarting = true }) return
+        if (!connectionLifecycle.isCurrent(config.generation)) return
         AppExecutorUtil.getAppExecutorService().submit {
             if (!connectionLifecycle.isCurrent(config.generation)) return@submit
             val sessionId = try {
@@ -410,7 +428,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                         disconnectAndReset()
                         Messages.showErrorDialog(project, e.message ?: "Cannot open OpenCode terminal", "OpenCode")
                     } finally {
-                        connectionLifecycle.update(config.generation) { terminalStarting = false }
+                        finishTerminalOpen(config.generation)
                     }
                 }
             }
@@ -502,7 +520,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun handleConnectionFailure() {
-        if (connection == null || !wasEverConnected) return
+        if (connection == null || !wasEverConnected || terminalOpening) return
         reconnectFailures++
         if (reconnectFailures >= RECONNECT_FAILURE_THRESHOLD && !reconnectDialogShown) {
             reconnectDialogShown = true
@@ -514,6 +532,10 @@ class OpenCodeService(private val project: Project) : Disposable {
         val token = connectionLifecycle.current()
         invokeForConnection(token) {
             if (isConnected.get()) return@invokeForConnection
+            if (terminalOpening) {
+                connectionLifecycle.update(token) { reconnectDialogShown = false }
+                return@invokeForConnection
+            }
             val choice = Messages.showYesNoCancelDialog(
                 project,
                 "Connection lost. Reconnect?",
@@ -524,8 +546,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                 Messages.getWarningIcon()
             )
             if (connectionLifecycle.isCurrent(token) && choice == Messages.NO) {
-                disconnectAndReset()
-                showConnectionDialog()
+                chooseNewConnection()
             }
         }
     }
@@ -548,29 +569,30 @@ class OpenCodeService(private val project: Project) : Disposable {
             )
             if (!connectionLifecycle.isCurrent(config.generation)) return@invokeForConnection
             when (choice) {
-                Messages.YES -> if (running) restoreUi(config) else reconnect(config)
-                Messages.NO -> {
-                    disconnectAndReset()
-                    showConnectionDialog()
-                }
+                Messages.YES -> if (running) ensureTerminalUi(config) else reconnect(config)
+                Messages.NO -> chooseNewConnection()
+                else -> finishTerminalOpen(config.generation)
             }
         }
     }
 
-    private fun restoreUi(config: ServerConnection) {
-        ensureTerminalUi(config)
+    private fun chooseNewConnection() {
+        val reset = disconnectAndReset(continueOpening = true)
+        showConnectionDialog(reset.generation)
     }
 
     private fun ensureTerminalUi(config: ServerConnection) {
         if (hasRunningTerminal()) {
             terminalHost.focus()
+            finishTerminalOpen(config.generation)
+            promptDelivery.resume()
             return
         }
         openTerminalUi(config)
     }
 
     private fun reconnect(config: ServerConnection) {
-        val reset = disconnectAndReset(clearPendingPastes = false)
+        val reset = disconnectAndReset(clearPendingPastes = false, continueOpening = true)
         reset.shutdown.whenComplete { _, _ ->
             invokeForConnection(reset.generation) {
                 val restarted = config.copy(generation = reset.generation)
@@ -610,7 +632,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun disconnectAndReset(
-        clearPendingPastes: Boolean = true, close: Boolean = false
+        clearPendingPastes: Boolean = true, close: Boolean = false, continueOpening: Boolean = false
     ): ConnectionReset {
         var shutdown = CompletableFuture.completedFuture<Void>(null)
         val token = connectionLifecycle.reset(close) {
@@ -629,10 +651,9 @@ class OpenCodeService(private val project: Project) : Disposable {
             )
             connection = null
             apiClient = null
-            terminalStarting = false
+            terminalOpening = continueOpening
             isConnected.set(false)
             isConnecting.set(false)
-            isConnectionDialogOpen.set(false)
             wasEverConnected = false
             reconnectFailures = 0
             reconnectDialogShown = false
