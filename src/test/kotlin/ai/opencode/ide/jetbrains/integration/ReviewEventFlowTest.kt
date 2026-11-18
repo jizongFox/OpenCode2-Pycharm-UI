@@ -7,6 +7,7 @@ import ai.opencode.ide.jetbrains.api.models.OpenCodeEvent
 import ai.opencode.ide.jetbrains.api.models.SessionExecutionEvent
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.review.ReviewCoordinator
+import ai.opencode.ide.jetbrains.session.ReviewResult
 import ai.opencode.ide.jetbrains.session.SessionManager
 import com.google.gson.Gson
 import com.intellij.notification.Notification
@@ -18,6 +19,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 
@@ -157,6 +159,47 @@ class ReviewEventFlowTest : BasePlatformTestCase() {
         assertSame(previousEntry, entries.first())
         assertEquals(1, initialReviewIndex)
         assertEquals(listOf("msg_first", "msg_second"), server.requestedTurns)
+    }
+
+    fun testLateCompletedTurnKeepsItsFilesWithoutReopeningANewerResolvedReview() {
+        fun diff(file: String, before: String, after: String) = mapOf(
+            "file" to file, "patch" to "@@ -1 +1 @@\n-$before\n+$after\n",
+            "additions" to 1, "deletions" to 1, "status" to "modified"
+        )
+
+        File(root, "first-only.txt").writeText("updated\n")
+        val firstDiffReady = CountDownLatch(1)
+        server.respondTo("msg_first", gson.toJson(mapOf("data" to listOf(
+            diff("review.txt", "old", "new"), diff("first-only.txt", "original", "updated")
+        ))), firstDiffReady)
+        server.respondTo("msg_second", gson.toJson(mapOf("data" to listOf(diff("review.txt", "new", "latest")))))
+
+        try {
+            enqueue("msg_first")
+            start()
+            deliver("msg_first")
+            enqueue("msg_second")
+            finish()
+            waitUntil { "msg_first" in server.requestedTurns }
+
+            start()
+            deliver("msg_second")
+            File(root, "review.txt").writeText("latest\n")
+            finish()
+            awaitReview()
+
+            val manager = project.service<SessionManager>()
+            var result: ReviewResult? = null
+            manager.rejectDiff(reviews.single().single()) { result = it }
+            waitUntil { result != null }
+            assertEquals(ReviewResult.Applied, result)
+            assertEquals("new\n", File(root, "review.txt").readText())
+        } finally {
+            firstDiffReady.countDown()
+        }
+
+        awaitReview(count = 2)
+        assertEquals(listOf("first-only.txt"), reviews.last().map { it.file })
     }
 
     fun testDeliveryCanIdentifyATurnBeforeTheBusyNotification() {

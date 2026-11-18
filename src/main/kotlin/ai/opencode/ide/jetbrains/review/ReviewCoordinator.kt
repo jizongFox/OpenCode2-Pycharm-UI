@@ -147,7 +147,7 @@ class ReviewCoordinator(
             if (files.isNotEmpty()) LocalFileSystem.getInstance().refreshIoFiles(files, false, false, null)
             val manager = sessionManager()
             val entries = synchronized(this) {
-                if (token != generation || snapshot.turnNumber != manager.getCurrentTurnNumber()) return
+                if (token != generation) return
                 manager.getProcessedDiffs(diffs, snapshot)
             }
             if (entries.isEmpty()) return
