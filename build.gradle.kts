@@ -7,8 +7,8 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "2.2.7"
-val pycharmVersion = providers.gradleProperty("pycharmVersion").getOrElse("2026.2.4")
+version = "2.2.8-rc1"
+val pycharmVersion = providers.gradleProperty("pycharmVersion").getOrElse("2026.3")
 val targetJavaVersion = providers.gradleProperty("targetJavaVersion").getOrElse("25")
 
 repositories {
@@ -54,6 +54,12 @@ intellijPlatform {
         }
 
         changeNotes = """
+            <h2>2.2.8-rc1</h2>
+            <ul>
+                <li>Stages only the reviewed file, including filenames with Git pathspec characters.</li>
+                <li>Retains completed turn reviews when the next turn starts before the diff arrives.</li>
+                <li>Shares a pending connection attempt across launch and code-reference actions.</li>
+            </ul>
             <h2>2.2.7</h2>
             <ul>
                 <li>Reports successful, failed, and interrupted turns, with failure details in the IDE.</li>

@@ -1,10 +1,10 @@
-# OpenCode UI for JetBrains (V2) — 2.2.7
+# OpenCode UI for JetBrains (V2) — 2.2.8-rc1
 
 OpenCode UI puts the OpenCode V2 terminal in a right-side editor split and shows completed file changes in the IDE's diff viewer.
 
 ## Requirements
 
-- The latest stable PyCharm release with its bundled Terminal plugin. This release targets PyCharm 2026.2.4 (build 262).
+- The latest stable PyCharm release with its bundled Terminal plugin. This trial targets PyCharm 2026.3 (build 263).
 - OpenCode V2 CLI. This release checks the official **OpenCode 2.2.5** CLI and server contract. Install it using the [V2 installation guide](https://opencode.ai/v2/docs), then run `opencode --version` to confirm a `2.x` release.
 
 ## Use
