@@ -20,6 +20,8 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.util.concurrency.AppExecutorUtil
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Paths
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -88,7 +90,8 @@ open class SessionManager(private val project: Project) : Disposable {
                 if (!isPending(entry) || !isStillCurrent(entry, absPath)) {
                     ReviewResult.Stale
                 } else {
-                    val cmd = GeneralCommandLine("git", "add", "--", entry.file).withWorkDirectory(root)
+                    val cmd = GeneralCommandLine("git", "--literal-pathspecs", "add", "--", entry.file)
+                        .withWorkDirectory(root)
                     val output = CapturingProcessHandler(cmd).runProcess(5000)
                     when {
                         output.isTimeout -> ReviewResult.Failed(
@@ -167,7 +170,12 @@ open class SessionManager(private val project: Project) : Disposable {
     }
 
     private fun isStillCurrent(entry: DiffEntry, absolutePath: String): Boolean {
-        val disk = File(absolutePath).takeIf { it.isFile }?.readText()
+        val file = File(absolutePath)
+        val disk = when {
+            file.isFile -> file.readText()
+            Files.notExists(file.toPath(), LinkOption.NOFOLLOW_LINKS) -> null
+            else -> return false
+        }
         val document = runReadAction {
             LocalFileSystem.getInstance().findFileByPath(absolutePath)
                 ?.takeIf { it.isValid }

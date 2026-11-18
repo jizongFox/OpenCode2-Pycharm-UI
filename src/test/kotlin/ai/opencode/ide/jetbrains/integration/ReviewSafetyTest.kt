@@ -12,6 +12,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 
 class ReviewSafetyTest : BasePlatformTestCase() {
@@ -87,6 +88,38 @@ class ReviewSafetyTest : BasePlatformTestCase() {
         assertEquals(0, show.exitValue())
         assertEquals("agent", show.inputStream.bufferedReader().readText())
         assertFalse(project.service<SessionManager>().isPending(entry))
+    }
+
+    fun testAcceptTreatsTheReviewedPathLiterally() {
+        val (entry, file) = reviewedFile(name = "weights[1].py", before = "", status = "added")
+        val root = File(file.parent.path)
+        File(root, "weights1.py").writeText("unrelated")
+        git(root, "init", "--quiet")
+
+        var result: ReviewResult? = null
+        project.service<SessionManager>().acceptDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Applied, result)
+        assertEquals("weights[1].py", git(root, "ls-files").trim())
+    }
+
+    fun testAcceptRefusesToStageADirectoryReplacingAReviewedDeletion() {
+        val (entry, file) = reviewedFile(after = "", status = "deleted")
+        val path = File(file.path)
+        val root = path.parentFile
+        git(root, "init", "--quiet")
+        git(root, "add", "--", entry.file)
+        runWriteAction { file.delete(this) }
+        assertTrue(path.mkdir())
+        File(path, "unrelated.txt").writeText("unrelated")
+
+        var result: ReviewResult? = null
+        project.service<SessionManager>().acceptDiff(entry) { result = it }
+        waitForResult { result }
+
+        assertEquals(ReviewResult.Stale, result)
+        assertEquals(entry.file, git(root, "ls-files").trim())
     }
 
     fun testRejectDoesNotRecreateAnEmptiedFileDeletedAfterReview() {
@@ -191,21 +224,29 @@ class ReviewSafetyTest : BasePlatformTestCase() {
     }
 
     private fun reviewedFile(
-        before: String = "before", after: String = "agent", status: String = "modified"
+        before: String = "before", after: String = "agent", status: String = "modified", name: String = "review.txt"
     ): Pair<DiffEntry, VirtualFile> {
         val root = createTempDirectory("opencode-review-").toFile()
         reviewRoot = root
-        val file = File(root, "review.txt").apply { writeText(after) }
+        val file = File(root, name).apply { writeText(after) }
         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
             ?: error("Review file is unavailable")
         val manager = project.service<SessionManager>()
         manager.configureWorkspaceRoot(root.path)
         assertTrue(manager.onTurnStart())
         val entry = manager.getProcessedDiffs(
-            listOf(FileDiff("review.txt", before, after, 1, 1, status)),
+            listOf(FileDiff(name, before, after, 1, 1, status)),
             manager.onTurnEnd() ?: error("Missing review turn")
         ).single()
         return entry to virtualFile
+    }
+
+    private fun git(root: File, vararg args: String): String {
+        val process = ProcessBuilder("git", *args).directory(root).redirectErrorStream(true).start()
+        assertTrue(process.waitFor(5, TimeUnit.SECONDS))
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        assertEquals(output, 0, process.exitValue())
+        return output
     }
 
     private fun waitForResult(result: () -> ReviewResult?) {
