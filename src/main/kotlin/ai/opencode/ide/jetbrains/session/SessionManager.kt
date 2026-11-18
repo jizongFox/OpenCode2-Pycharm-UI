@@ -23,18 +23,19 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Paths
-import java.util.Collections
-import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 
 /** Stores review entries for the current workspace; OpenCode V2 supplies each turn's file contents. */
 open class SessionManager(private val project: Project) : Disposable {
+    private data class FileReview(val turnNumber: Int, val pending: DiffEntry?)
+
     private val logger = Logger.getInstance(SessionManager::class.java)
     @Volatile private var workspaceRoot: String? = project.basePath
-    @Volatile private var turnNumber = 0
+    private var turnNumber = 0
+    private var firstTurnToReview = 1
     @Volatile private var isBusy = false
     private val userEditedFiles = ConcurrentHashMap.newKeySet<String>()
-    private val pendingDiffs = Collections.synchronizedMap(LinkedHashMap<String, DiffEntry>())
+    private val fileReviews = LinkedHashMap<String, FileReview>()
 
     private val documentListener = object : DocumentListener {
         override fun documentChanged(event: DocumentEvent) {
@@ -68,18 +69,22 @@ open class SessionManager(private val project: Project) : Disposable {
 
     @Synchronized
     fun getProcessedDiffs(serverDiffs: List<FileDiff>, snapshot: TurnSnapshot): List<DiffEntry> {
-        if (snapshot.turnNumber != turnNumber || isBusy) return emptyList()
-        val entries = serverDiffs.mapNotNull { diff ->
+        val lastCompletedTurn = if (isBusy) turnNumber - 1 else turnNumber
+        if (snapshot.turnNumber !in firstTurnToReview..lastCompletedTurn) return emptyList()
+        return serverDiffs.mapNotNull { diff ->
             val relative = PathUtil.relativizeWithinRoot(workspaceRoot, diff.file) ?: return@mapNotNull null
             if (relative in snapshot.userEditedFiles) return@mapNotNull null
+            val previous = fileReviews[relative]
+            if (previous != null && previous.turnNumber >= snapshot.turnNumber) return@mapNotNull null
             val normalized = diff.copy(file = relative)
             if (normalized.before == normalized.after && normalized.status !in listOf("added", "deleted")) {
                 return@mapNotNull null
             }
-            DiffEntry(relative, normalized)
+            val entry = DiffEntry(relative, normalized)
+            if (previous?.pending == null) fileReviews.remove(relative)
+            fileReviews[relative] = FileReview(snapshot.turnNumber, entry)
+            entry
         }
-        entries.forEach { pendingDiffs[it.file] = it }
-        return entries
     }
 
     fun acceptDiff(entry: DiffEntry, onComplete: ((ReviewResult) -> Unit)? = null) {
@@ -154,19 +159,21 @@ open class SessionManager(private val project: Project) : Disposable {
         }
     }
 
-    fun getCurrentTurnNumber(): Int = turnNumber
-
+    @Synchronized
     fun getDiffForFile(path: String): DiffEntry? =
-        PathUtil.relativizeWithinRoot(workspaceRoot, path)?.let(pendingDiffs::get)
+        PathUtil.relativizeWithinRoot(workspaceRoot, path)?.let { fileReviews[it]?.pending }
 
-    fun getAllDiffEntries(): List<DiffEntry> = synchronized(pendingDiffs) { pendingDiffs.values.toList() }
+    @Synchronized
+    fun getAllDiffEntries(): List<DiffEntry> = fileReviews.values.mapNotNull { it.pending }
 
-    fun isPending(entry: DiffEntry): Boolean = synchronized(pendingDiffs) {
-        pendingDiffs[entry.file] === entry
-    }
+    @Synchronized
+    fun isPending(entry: DiffEntry): Boolean = fileReviews[entry.file]?.pending === entry
 
-    private fun removePending(entry: DiffEntry) = synchronized(pendingDiffs) {
-        if (pendingDiffs[entry.file] === entry) pendingDiffs.remove(entry.file)
+    @Synchronized
+    private fun removePending(entry: DiffEntry) {
+        val review = fileReviews[entry.file] ?: return
+        // Keep its turn number so a late response cannot bring back an older review.
+        if (review.pending === entry) fileReviews[entry.file] = review.copy(pending = null)
     }
 
     private fun isStillCurrent(entry: DiffEntry, absolutePath: String): Boolean {
@@ -188,7 +195,8 @@ open class SessionManager(private val project: Project) : Disposable {
     fun clear() {
         isBusy = false
         userEditedFiles.clear()
-        pendingDiffs.clear()
+        fileReviews.clear()
+        firstTurnToReview = turnNumber + 1
     }
 
     @Synchronized

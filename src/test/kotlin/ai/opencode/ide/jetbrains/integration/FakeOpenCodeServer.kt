@@ -6,13 +6,17 @@ import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Wire-compatible subset of the released V2 API. */
 class FakeOpenCodeServer {
+    private data class DiffResponse(val body: String, val ready: CountDownLatch?)
+
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     private val streams = CopyOnWriteArrayList<OutputStream>()
-    private val responses = ConcurrentHashMap<String, String>()
+    private val responses = ConcurrentHashMap<String, DiffResponse>()
     private val errors = ConcurrentHashMap.newKeySet<String>()
     private val sessionStates = ConcurrentHashMap<String, String>()
     private val executor = Executors.newCachedThreadPool()
@@ -41,7 +45,9 @@ class FakeOpenCodeServer {
             val from = ex.requestURI.rawQuery?.substringAfter("from=", "")
                 ?.substringBefore('&')?.let { URLDecoder.decode(it, "UTF-8") }.orEmpty()
             requestedTurns.add(from)
-            val body = responses[from] ?: """{"data":[]}"""
+            val response = responses[from]
+            check(response?.ready?.await(10, TimeUnit.SECONDS) != false) { "Timed out waiting for diff $from" }
+            val body = response?.body ?: """{"data":[]}"""
             ex.sendResponseHeaders(if (from in errors) 503 else 200, body.toByteArray().size.toLong())
             ex.responseBody.use { it.write(body.toByteArray()) }
         }
@@ -66,7 +72,9 @@ class FakeOpenCodeServer {
         server.stop(0)
         executor.shutdownNow()
     }
-    fun respondTo(from: String, json: String) { responses[from] = json }
+    fun respondTo(from: String, json: String, ready: CountDownLatch? = null) {
+        responses[from] = DiffResponse(json, ready)
+    }
     fun respondErrorTo(from: String) { errors.add(from) }
     fun respondSessionState(id: String, json: String) { sessionStates[id] = json }
 
